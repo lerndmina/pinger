@@ -2,7 +2,9 @@ import blessed from "blessed";
 import * as contrib from "blessed-contrib";
 import chalk from "chalk";
 import Database from "bun:sqlite";
-import { existsSync } from "fs";
+import { existsSync, mkdirSync } from "fs";
+import { join } from "path";
+import { appendFile, writeFile } from "fs/promises";
 
 interface PingStats {
   totalPings: number;
@@ -11,7 +13,88 @@ interface PingStats {
   latencies: number[];
 }
 
+class Logger {
+  private logDir: string;
+  private logFilePath: string;
+  private initialized: boolean = false;
+  private latestLogs: string[] = [];
+  private onNewLog?: (logs: string[]) => void;
+
+  constructor() {
+    // Ensure logs directory exists
+    const logsBaseDir = join(process.cwd(), "src", "logs");
+    if (!existsSync(logsBaseDir)) {
+      mkdirSync(logsBaseDir, { recursive: true });
+    }
+
+    // Create timestamped log directory
+    const timestamp = new Date().toISOString().replace(/[:]/g, "-").split("T")[0] + "-" + new Date().toTimeString().split(" ")[0].replace(/:/g, "-");
+    this.logDir = join(logsBaseDir, timestamp);
+
+    // Create log file path
+    this.logFilePath = join(this.logDir, "pinger.log");
+  }
+
+  public setLogUpdateCallback(callback: (logs: string[]) => void) {
+    this.onNewLog = callback;
+  }
+
+  private async ensureLogFile() {
+    if (this.initialized) return;
+
+    // Create log directory
+    if (!existsSync(this.logDir)) {
+      mkdirSync(this.logDir, { recursive: true });
+    }
+
+    // Create initial log file
+    await writeFile(this.logFilePath, `Pinger Log Started: ${new Date().toISOString()}\n`, { flag: "w" });
+    this.initialized = true;
+  }
+
+  public async log(message: string, level: "INFO" | "WARN" | "ERROR" | "DEBUG" = "INFO") {
+    await this.ensureLogFile();
+
+    const logEntry = `[${new Date().toISOString()}] [${level}] ${message}`;
+
+    // Add to latest logs buffer, keeping only last 6
+    this.latestLogs.push(logEntry);
+    if (this.latestLogs.length > 6) {
+      this.latestLogs.shift();
+    }
+
+    // Notify callback if set
+    if (this.onNewLog) {
+      this.onNewLog(this.latestLogs);
+    }
+
+    // Write to log file
+    await appendFile(this.logFilePath, logEntry + "\n");
+
+    // Console output
+    switch (level) {
+      case "ERROR":
+        console.error(chalk.red(logEntry));
+        break;
+      case "WARN":
+        console.warn(chalk.yellow(logEntry));
+        break;
+      case "DEBUG":
+        console.debug(chalk.blue(logEntry));
+        break;
+      default:
+        console.log(logEntry);
+    }
+  }
+
+  public async error(error: Error | string) {
+    const errorMessage = error instanceof Error ? error.stack || error.message : error;
+    await this.log(errorMessage, "ERROR");
+  }
+}
+
 class Pinger {
+  private logger: Logger;
   private stats: PingStats = {
     totalPings: 0,
     successful: 0,
@@ -26,31 +109,45 @@ class Pinger {
   private grid!: contrib.grid;
   private table: any;
   private chart: any;
+  private logBox: any;
   private target!: string;
   private isRunning = true;
   private latencyHistory: number[] = [];
 
   constructor(target?: string) {
-    // Initialize SQLite database
-    this.db = new Database(this.DB_PATH);
-    this.initDatabase();
+    // Initialize logger
+    this.logger = new Logger();
 
-    // Load last target and historical data
-    const lastTargetResult = this.db.query("SELECT value FROM settings WHERE key = 'last_target'").get() as { value: string } | null;
-    this.target = target || lastTargetResult?.value;
+    try {
+      // Initialize SQLite database
+      this.db = new Database(this.DB_PATH);
+      this.initDatabase();
 
-    if (!this.target) {
-      console.error(chalk.red("No target provided and no previous target found"));
+      // Log startup
+      this.logger.log(`Pinger started with target: ${target}`, "INFO");
+
+      // Load last target and historical data
+      const lastTargetResult = this.db.query("SELECT value FROM settings WHERE key = 'last_target'").get() as { value: string } | null;
+      this.target = target || lastTargetResult?.value;
+
+      if (!this.target) {
+        throw new Error("No target provided and no previous target found");
+      }
+
+      // Log target selection
+      this.logger.log(`Target selected: ${this.target}`, "INFO");
+
+      // Load historical stats if same target
+      if (lastTargetResult?.value === this.target) {
+        this.loadHistoricalStats();
+      }
+
+      // Save current target
+      this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_target', ?)", [this.target]);
+    } catch (error) {
+      this.logger.error(error as Error);
       process.exit(1);
     }
-
-    // Load historical stats if same target
-    if (lastTargetResult?.value === this.target) {
-      this.loadHistoricalStats();
-    }
-
-    // Save current target
-    this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_target', ?)", [this.target]);
   }
 
   private initDatabase() {
@@ -141,7 +238,7 @@ class Pinger {
       screen: this.screen,
     });
 
-    // Add stats table
+    // Add stats table (top left)
     this.table = this.grid.set(0, 0, 6, 6, contrib.table, {
       keys: true,
       fg: "white",
@@ -156,7 +253,15 @@ class Pinger {
       columnWidth: [15, 20],
     });
 
-    // Add latency chart
+    // Add latest logs box (top right)
+    this.logBox = this.grid.set(0, 6, 6, 6, contrib.log, {
+      fg: "green",
+      selectedFg: "green",
+      label: "Latest Logs",
+      border: { type: "line", fg: "cyan" },
+    });
+
+    // Add latency chart (bottom)
     this.chart = this.grid.set(6, 0, 6, 12, contrib.line, {
       style: { line: "yellow", text: "green", baseline: "cyan" },
       xLabelPadding: 3,
@@ -164,6 +269,12 @@ class Pinger {
       showLegend: true,
       wholeNumbersOnly: false,
       label: "Latency History",
+    });
+
+    // Set up log update callback
+    this.logger.setLogUpdateCallback((logs: string[]) => {
+      this.logBox.setItems(logs);
+      this.screen.render();
     });
   }
 
@@ -257,28 +368,53 @@ class Pinger {
   }
 
   public async start() {
-    // Initialize screen after data load
-    this.initScreen();
+    try {
+      // Initialize screen after data load
+      this.initScreen();
 
-    while (this.isRunning) {
-      try {
-        const latency = await this.ping();
-        this.stats.successful++;
-        this.stats.latencies.push(latency);
-        this.saveResult(latency, true);
-      } catch (err) {
-        this.stats.failed++;
-        this.saveResult(null, false);
+      while (this.isRunning) {
+        try {
+          const latency = await this.ping();
+          this.stats.successful++;
+          this.stats.latencies.push(latency);
+          this.saveResult(latency, true);
+        } catch (err) {
+          this.stats.failed++;
+          this.saveResult(null, false);
+          await this.logger.log(`Ping failed: ${err}`, "WARN");
+        }
+        this.stats.totalPings++;
+        this.updateDisplay();
+        await new Promise((resolve) => setTimeout(resolve, 1000));
       }
-      this.stats.totalPings++;
-      this.updateDisplay();
-      await new Promise((resolve) => setTimeout(resolve, 1000));
+    } catch (error) {
+      await this.logger.error(error as Error);
+      this.stop();
     }
   }
 
   public stop() {
-    this.isRunning = false;
-    this.db.close();
+    try {
+      this.isRunning = false;
+      this.db.close();
+      this.logger.log("Pinger stopped gracefully", "INFO");
+    } catch (error) {
+      this.logger.error(error as Error);
+    }
+  }
+
+  private setupGlobalErrorHandling() {
+    process.on("uncaughtException", async (error) => {
+      await this.logger.error(`Uncaught Exception: ${error.message}`);
+      this.stop();
+      process.exit(1);
+    });
+
+    process.on("unhandledRejection", async (reason, promise) => {
+      await this.logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
+      this.stop();
+      process.exit(1);
+    });
   }
 }
 
