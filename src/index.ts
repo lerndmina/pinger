@@ -1,20 +1,14 @@
 import blessed from "blessed";
 import * as contrib from "blessed-contrib";
 import chalk from "chalk";
+import Database from "bun:sqlite";
 import { existsSync } from "fs";
-import { readFile, writeFile } from "fs/promises";
 
 interface PingStats {
   totalPings: number;
   successful: number;
   failed: number;
   latencies: number[];
-}
-
-interface StoredData {
-  lastTarget: string;
-  stats: PingStats;
-  latencyHistory: number[];
 }
 
 class Pinger {
@@ -25,12 +19,8 @@ class Pinger {
     latencies: [],
   };
 
-  private readonly DB_PATH = "ping_history.json";
-
-  private currentDimensions = {
-    width: process.stdout.columns,
-    height: process.stdout.rows,
-  };
+  private readonly DB_PATH = "ping_history.sqlite";
+  private db: Database;
 
   private screen!: blessed.Widgets.Screen;
   private grid!: contrib.grid;
@@ -41,21 +31,88 @@ class Pinger {
   private latencyHistory: number[] = [];
 
   constructor(target?: string) {
-    this.loadData().then((data) => {
-      this.target = target || data?.lastTarget;
-      if (!this.target) {
-        console.error(chalk.red("No target provided and no previous target found"));
-        process.exit(1);
-      }
+    // Initialize SQLite database
+    this.db = new Database(this.DB_PATH);
+    this.initDatabase();
 
-      if (data && this.target === data.lastTarget) {
-        this.stats = data.stats;
-        this.latencyHistory = data.latencyHistory;
-      }
+    // Load last target and historical data
+    const lastTargetResult = this.db.query("SELECT value FROM settings WHERE key = 'last_target'").get() as { value: string } | null;
+    this.target = target || lastTargetResult?.value;
 
-      // Initialize screen after data load
-      this.initScreen();
-    });
+    if (!this.target) {
+      console.error(chalk.red("No target provided and no previous target found"));
+      process.exit(1);
+    }
+
+    // Load historical stats if same target
+    if (lastTargetResult?.value === this.target) {
+      this.loadHistoricalStats();
+    }
+
+    // Save current target
+    this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_target', ?)", [this.target]);
+  }
+
+  private initDatabase() {
+    // Create necessary tables if they don't exist
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS settings (
+        key TEXT PRIMARY KEY,
+        value TEXT
+      )
+    `);
+
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ping_results (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP,
+        latency REAL,
+        is_successful INTEGER
+      )
+    `);
+
+    // Create an index to improve query performance
+    this.db.run(`
+      CREATE INDEX IF NOT EXISTS idx_ping_results_timestamp 
+      ON ping_results (timestamp)
+    `);
+  }
+
+  private loadHistoricalStats() {
+    // Load last 5000 successful pings for in-memory history
+    const latencyResults = this.db
+      .query(
+        `
+      SELECT latency 
+      FROM ping_results 
+      WHERE is_successful = 1 
+      ORDER BY id DESC 
+      LIMIT 5000
+    `
+      )
+      .all() as { latency: number }[];
+
+    this.latencyHistory = latencyResults.map((r) => r.latency).reverse();
+
+    // Load overall stats
+    const statsResult = this.db
+      .query(
+        `
+      SELECT 
+        COUNT(*) as total_pings,
+        SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_pings,
+        SUM(CASE WHEN is_successful = 0 THEN 1 ELSE 0 END) as failed_pings
+      FROM ping_results
+    `
+      )
+      .get() as { total_pings: number; successful_pings: number; failed_pings: number };
+
+    this.stats = {
+      totalPings: statsResult.total_pings,
+      successful: statsResult.successful_pings,
+      failed: statsResult.failed_pings,
+      latencies: this.latencyHistory,
+    };
   }
 
   private initScreen() {
@@ -71,10 +128,8 @@ class Pinger {
 
     // Handle exit with save
     this.screen.key(["escape", "q", "C-c"], () => {
-      this.saveData().then(() => {
-        this.stop();
-        process.exit(0);
-      });
+      this.stop();
+      process.exit(0);
     });
   }
 
@@ -118,6 +173,61 @@ class Pinger {
     return sorted[index];
   }
 
+  private saveResult(latency: number | null, isSuccessful: boolean) {
+    // Insert ping result
+    this.db.run("INSERT INTO ping_results (latency, is_successful) VALUES (?, ?)", [latency, isSuccessful ? 1 : 0]);
+
+    // Maintain only the last 50,000 results in the database
+    this.db.run(`
+      DELETE FROM ping_results 
+      WHERE id NOT IN (
+        SELECT id FROM (
+          SELECT id 
+          FROM ping_results 
+          ORDER BY id DESC 
+          LIMIT 50000
+        )
+      )
+    `);
+  }
+
+  private updateDisplay() {
+    if (!this.table) {
+      console.error("UI not initialized");
+      return;
+    }
+
+    const successRate = (this.stats.successful / this.stats.totalPings) * 100;
+    const failRate = (this.stats.failed / this.stats.totalPings) * 100;
+
+    // Update table data
+    this.table.setData({
+      headers: ["Metric", "Value"],
+      data: [
+        ["Total Pings", this.stats.totalPings.toString()],
+        ["Successful", `${this.stats.successful} (${successRate.toFixed(1)}%)`],
+        ["Failed", `${this.stats.failed} (${failRate.toFixed(1)}%)`],
+        ["Max Latency", this.stats.latencies.length ? Math.max(...this.stats.latencies).toFixed(2) + " ms" : "N/A"],
+        ["Avg Latency", this.stats.latencies.length ? (this.stats.latencies.reduce((a, b) => a + b, 0) / this.stats.latencies.length).toFixed(2) + " ms" : "N/A"],
+        ["99th %ile", this.stats.latencies.length ? this.calculatePercentile(this.stats.latencies, 99).toFixed(2) + " ms" : "N/A"],
+      ],
+    });
+
+    // Update chart data with last 5000 results
+    this.latencyHistory.push(this.stats.latencies[this.stats.latencies.length - 1] || 0);
+    if (this.latencyHistory.length > 5000) this.latencyHistory.shift();
+
+    this.chart.setData([
+      {
+        title: "Latency",
+        x: [...Array(this.latencyHistory.length)].map((_, i) => (i + 1).toString()),
+        y: this.latencyHistory,
+      },
+    ]);
+
+    this.screen.render();
+  }
+
   private getPingArgs(): string[] {
     switch (process.platform) {
       case "win32":
@@ -146,85 +256,29 @@ class Pinger {
     }
   }
 
-  private updateDisplay() {
-    const successRate = (this.stats.successful / this.stats.totalPings) * 100;
-    const failRate = (this.stats.failed / this.stats.totalPings) * 100;
-
-    // Update table data
-    this.table.setData({
-      headers: ["Metric", "Value"],
-      data: [
-        ["Total Pings", this.stats.totalPings.toString()],
-        ["Successful", `${this.stats.successful} (${successRate.toFixed(1)}%)`],
-        ["Failed", `${this.stats.failed} (${failRate.toFixed(1)}%)`],
-        ["Max Latency", this.stats.latencies.length ? Math.max(...this.stats.latencies).toFixed(2) + " ms" : "N/A"],
-        ["Avg Latency", this.stats.latencies.length ? (this.stats.latencies.reduce((a, b) => a + b, 0) / this.stats.latencies.length).toFixed(2) + " ms" : "N/A"],
-        ["99th %ile", this.stats.latencies.length ? this.calculatePercentile(this.stats.latencies, 99).toFixed(2) + " ms" : "N/A"],
-      ],
-    });
-
-    // Update chart data
-    this.latencyHistory.push(this.stats.latencies[this.stats.latencies.length - 1] || 0);
-    if (this.latencyHistory.length > 30) this.latencyHistory.shift();
-
-    this.chart.setData([
-      {
-        title: "Latency",
-        x: [...Array(this.latencyHistory.length)].map((_, i) => (i + 1).toString()),
-        y: this.latencyHistory,
-      },
-    ]);
-
-    this.screen.render();
-  }
-
-  private async loadData(): Promise<StoredData | null> {
-    try {
-      if (!existsSync(this.DB_PATH)) return null;
-      const data = await readFile(this.DB_PATH, "utf-8");
-      return JSON.parse(data);
-    } catch (err) {
-      console.error("Failed to load data:", err);
-      return null;
-    }
-  }
-
-  private async saveData(): Promise<void> {
-    try {
-      const data: StoredData = {
-        lastTarget: this.target,
-        stats: this.stats,
-        latencyHistory: this.latencyHistory,
-      };
-      await writeFile(this.DB_PATH, JSON.stringify(data, null, 2));
-    } catch (err) {
-      console.error("Failed to save data:", err);
-    }
-  }
-
   public async start() {
-    // Periodic save every 5 minutes
-    const saveInterval = setInterval(() => this.saveData(), 5 * 60 * 1000);
+    // Initialize screen after data load
+    this.initScreen();
 
     while (this.isRunning) {
       try {
         const latency = await this.ping();
         this.stats.successful++;
         this.stats.latencies.push(latency);
-      } catch {
+        this.saveResult(latency, true);
+      } catch (err) {
         this.stats.failed++;
+        this.saveResult(null, false);
       }
       this.stats.totalPings++;
       this.updateDisplay();
       await new Promise((resolve) => setTimeout(resolve, 1000));
     }
-
-    clearInterval(saveInterval);
   }
 
   public stop() {
     this.isRunning = false;
-    this.saveData(); // Final save on stop
+    this.db.close();
   }
 }
 
