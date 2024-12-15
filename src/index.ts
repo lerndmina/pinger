@@ -132,6 +132,7 @@ class Pinger {
     failed: 0,
     latencies: [],
   };
+  private currentLayout: any[] = [];
 
   private readonly DB_PATH = "ping_history.sqlite";
   private db: Database;
@@ -181,6 +182,22 @@ class Pinger {
     } catch (error) {
       this.logger.error(error as Error);
       process.exit(1);
+    }
+  }
+
+  private clearScreen() {
+    // Properly destroy all existing components
+    this.currentLayout.forEach((component) => {
+      if (component && typeof component.destroy === "function") {
+        component.destroy();
+      }
+    });
+    this.currentLayout = [];
+
+    // Clear the screen's children
+    while (this.screen.children.length) {
+      const child = this.screen.children[0];
+      this.screen.remove(child);
     }
   }
 
@@ -253,29 +270,32 @@ class Pinger {
       fullUnicode: true,
       autoPadding: true,
       handleUncaughtExceptions: true,
+      terminal: "xterm-256color", // Force consistent terminal type
     });
 
+    // Initial layout creation
     this.createLayout();
 
-    // Add resize handler
+    // Add robust resize handler
+    let resizeTimeout: NodeJS.Timeout;
     this.screen.on("resize", () => {
-      // Clear existing layout
-      this.screen.children.forEach((child) => {
-        this.screen.remove(child);
-      });
+      // Debounce resize events
+      if (resizeTimeout) {
+        clearTimeout(resizeTimeout);
+      }
 
-      // Recreate the layout
-      this.createLayout();
-
-      // Update display with current data
-      this.updateDisplay();
-
-      // Force a screen render
-      this.screen.render();
+      resizeTimeout = setTimeout(() => {
+        // Clear and recreate everything
+        this.clearScreen();
+        this.createLayout();
+        this.updateDisplay();
+        this.screen.render();
+      }, 100); // Wait for 100ms after last resize event
     });
 
     // Handle exit with save
     this.screen.key(["escape", "q", "C-c"], () => {
+      this.clearScreen();
       this.stop();
       process.exit(0);
     });
@@ -301,6 +321,7 @@ class Pinger {
       columnSpacing: 2,
       columnWidth: [15, 20],
     });
+    this.currentLayout.push(this.table);
 
     // Configure log box with proper formatting
     this.logBox = this.grid.set(0, 6, 6, 6, contrib.log, {
@@ -308,7 +329,6 @@ class Pinger {
       selectedFg: "green",
       label: "Latest Logs",
       border: { type: "line", fg: "magenta" },
-      height: "50%",
       tags: true,
       style: {
         fg: "green",
@@ -317,11 +337,9 @@ class Pinger {
         },
       },
       screen: this.screen,
-      bufferLength: 6, // Match the logger's latest logs length
-      formatters: {
-        log: (args) => args.join(" "),
-      },
+      bufferLength: 6,
     });
+    this.currentLayout.push(this.logBox);
 
     // Add latency chart (full width of bottom section)
     this.chart = this.grid.set(6, 0, 6, 12, contrib.line, {
@@ -331,16 +349,26 @@ class Pinger {
       showLegend: true,
       wholeNumbersOnly: false,
       label: "Latency History",
+      border: { type: "line" },
     });
+    this.currentLayout.push(this.chart);
 
     // Set up log update callback with proper screen rendering
     this.logger.setLogUpdateCallback((logs: string[]) => {
-      this.logBox.setItems(logs);
-      // Ensure content is cleared before updating
-      this.logBox.setContent("");
-      this.logBox.setItems(logs);
-      this.screen.render();
+      if (this.logBox) {
+        this.logBox.setItems(logs);
+        this.screen.render();
+      }
     });
+
+    // Initialize with existing logs
+    const currentLogs = this.logger.getLatestLogs();
+    if (currentLogs.length > 0) {
+      this.logBox.setItems(currentLogs);
+    }
+
+    // Force a clean render
+    this.screen.render();
   }
 
   private calculatePercentile(arr: number[], percentile: number): number {
@@ -368,40 +396,46 @@ class Pinger {
   }
 
   private updateDisplay() {
-    if (!this.table) {
-      console.error("UI not initialized");
+    if (!this.table || !this.chart) {
+      this.logger.log("Display components not initialized", "WARN");
       return;
     }
 
-    const successRate = (this.stats.successful / this.stats.totalPings) * 100;
-    const failRate = (this.stats.failed / this.stats.totalPings) * 100;
+    try {
+      const successRate = (this.stats.successful / this.stats.totalPings) * 100;
+      const failRate = (this.stats.failed / this.stats.totalPings) * 100;
 
-    // Update table data
-    this.table.setData({
-      headers: ["Metric", "Value"],
-      data: [
-        ["Total Pings", this.stats.totalPings.toString()],
-        ["Successful", `${this.stats.successful} (${successRate.toFixed(1)}%)`],
-        ["Failed", `${this.stats.failed} (${failRate.toFixed(1)}%)`],
-        ["Max Latency", this.stats.latencies.length ? Math.max(...this.stats.latencies).toFixed(2) + " ms" : "N/A"],
-        ["Avg Latency", this.stats.latencies.length ? (this.stats.latencies.reduce((a, b) => a + b, 0) / this.stats.latencies.length).toFixed(2) + " ms" : "N/A"],
-        ["99th %ile", this.stats.latencies.length ? this.calculatePercentile(this.stats.latencies, 99).toFixed(2) + " ms" : "N/A"],
-      ],
-    });
+      // Update table data
+      this.table.setData({
+        headers: ["Metric", "Value"],
+        data: [
+          ["Total Pings", this.stats.totalPings.toString()],
+          ["Successful", `${this.stats.successful} (${successRate.toFixed(1)}%)`],
+          ["Failed", `${this.stats.failed} (${failRate.toFixed(1)}%)`],
+          ["Max Latency", this.stats.latencies.length ? Math.max(...this.stats.latencies).toFixed(2) + " ms" : "N/A"],
+          ["Avg Latency", this.stats.latencies.length ? (this.stats.latencies.reduce((a, b) => a + b, 0) / this.stats.latencies.length).toFixed(2) + " ms" : "N/A"],
+          ["99th %ile", this.stats.latencies.length ? this.calculatePercentile(this.stats.latencies, 99).toFixed(2) + " ms" : "N/A"],
+        ],
+      });
 
-    // Update chart data with last 5000 results
-    this.latencyHistory.push(this.stats.latencies[this.stats.latencies.length - 1] || 0);
-    if (this.latencyHistory.length > 5000) this.latencyHistory.shift();
+      // Update chart data with last 5000 results
+      this.latencyHistory.push(this.stats.latencies[this.stats.latencies.length - 1] || 0);
+      if (this.latencyHistory.length > 5000) this.latencyHistory.shift();
 
-    this.chart.setData([
-      {
-        title: "Latency",
-        x: [...Array(this.latencyHistory.length)].map((_, i) => (i + 1).toString()),
-        y: this.latencyHistory,
-      },
-    ]);
+      this.chart.setData([
+        {
+          title: "Latency",
+          x: [...Array(this.latencyHistory.length)].map((_, i) => (i + 1).toString()),
+          y: this.latencyHistory,
+        },
+      ]);
 
-    this.screen.render();
+      // Ensure clean render
+      this.screen.clearRegion(0, this.screen.width, 0, this.screen.height);
+      this.screen.render();
+    } catch (error) {
+      this.logger.error(`Display update error: ${error}`);
+    }
   }
 
   private getPingArgs(): string[] {
