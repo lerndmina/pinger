@@ -18,7 +18,9 @@ class Logger {
   private logFilePath: string;
   private initialized: boolean = false;
   private latestLogs: string[] = [];
-  private onNewLog?: (logs: string[]) => void;
+  private logUpdateCallback?: (logs: string[]) => void;
+  private initPromise: Promise<void>;
+  private maxLogLength: number = 80; // Prevent long lines from breaking layout
 
   constructor() {
     // Ensure logs directory exists
@@ -33,10 +35,25 @@ class Logger {
 
     // Create log file path
     this.logFilePath = join(this.logDir, "pinger.log");
+
+    // Initialize immediately
+    this.initPromise = this.ensureLogFile();
+  }
+
+  private formatLogMessage(message: string): string {
+    // Truncate long messages to prevent display issues
+    if (message.length > this.maxLogLength) {
+      return message.substring(0, this.maxLogLength - 3) + "...";
+    }
+    return message;
   }
 
   public setLogUpdateCallback(callback: (logs: string[]) => void) {
-    this.onNewLog = callback;
+    this.logUpdateCallback = callback;
+    // Send initial logs if any exist
+    if (this.latestLogs.length > 0) {
+      callback(this.latestLogs);
+    }
   }
 
   private async ensureLogFile() {
@@ -52,44 +69,58 @@ class Logger {
     this.initialized = true;
   }
 
-  public async log(message: string, level: "INFO" | "WARN" | "ERROR" | "DEBUG" = "INFO") {
-    await this.ensureLogFile();
+  public log(message: string, level: "INFO" | "WARN" | "ERROR" | "DEBUG" = "INFO") {
+    const timestamp = new Date().toISOString();
+    const formattedMessage = this.formatLogMessage(message);
+    const logEntry = `[${timestamp}] [${level}] ${formattedMessage}`;
 
-    const logEntry = `[${new Date().toISOString()}] [${level}] ${message}`;
-
-    // Add to latest logs buffer, keeping only last 6
+    // Update latest logs with clean formatting
     this.latestLogs.push(logEntry);
     if (this.latestLogs.length > 6) {
       this.latestLogs.shift();
     }
 
-    // Notify callback if set
-    if (this.onNewLog) {
-      this.onNewLog(this.latestLogs);
+    // Update UI with proper blessed formatting
+    if (this.logUpdateCallback) {
+      const colorizedLogs = this.latestLogs.map((log) => {
+        if (log.includes("[ERROR]")) return `{red-fg}${log}{/red-fg}`;
+        if (log.includes("[WARN]")) return `{yellow-fg}${log}{/yellow-fg}`;
+        if (log.includes("[DEBUG]")) return `{blue-fg}${log}{/blue-fg}`;
+        return `{green-fg}${log}{/green-fg}`;
+      });
+      this.logUpdateCallback(colorizedLogs);
     }
 
-    // Write to log file
-    await appendFile(this.logFilePath, logEntry + "\n");
+    // Handle file writing asynchronously
+    this.initPromise.then(() => {
+      appendFile(this.logFilePath, logEntry + "\n").catch((err) => console.error("Failed to write to log file:", err));
+    });
 
-    // Console output
-    switch (level) {
-      case "ERROR":
-        console.error(chalk.red(logEntry));
-        break;
-      case "WARN":
-        console.warn(chalk.yellow(logEntry));
-        break;
-      case "DEBUG":
-        console.debug(chalk.blue(logEntry));
-        break;
-      default:
-        console.log(logEntry);
+    // Console output (only when blessed screen is not active)
+    if (!blessed.Screen.global) {
+      switch (level) {
+        case "ERROR":
+          console.error(chalk.red(logEntry));
+          break;
+        case "WARN":
+          console.warn(chalk.yellow(logEntry));
+          break;
+        case "DEBUG":
+          console.debug(chalk.blue(logEntry));
+          break;
+        default:
+          console.log(logEntry);
+      }
     }
   }
 
-  public async error(error: Error | string) {
+  public error(error: Error | string) {
     const errorMessage = error instanceof Error ? error.stack || error.message : error;
-    await this.log(errorMessage, "ERROR");
+    this.log(errorMessage, "ERROR");
+  }
+
+  public getLatestLogs(): string[] {
+    return this.latestLogs;
   }
 }
 
@@ -144,6 +175,9 @@ class Pinger {
 
       // Save current target
       this.db.run("INSERT OR REPLACE INTO settings (key, value) VALUES ('last_target', ?)", [this.target]);
+
+      // Set up global error handling
+      this.setupGlobalErrorHandling();
     } catch (error) {
       this.logger.error(error as Error);
       process.exit(1);
@@ -223,6 +257,23 @@ class Pinger {
 
     this.createLayout();
 
+    // Add resize handler
+    this.screen.on("resize", () => {
+      // Clear existing layout
+      this.screen.children.forEach((child) => {
+        this.screen.remove(child);
+      });
+
+      // Recreate the layout
+      this.createLayout();
+
+      // Update display with current data
+      this.updateDisplay();
+
+      // Force a screen render
+      this.screen.render();
+    });
+
     // Handle exit with save
     this.screen.key(["escape", "q", "C-c"], () => {
       this.stop();
@@ -238,7 +289,7 @@ class Pinger {
       screen: this.screen,
     });
 
-    // Add stats table (top left)
+    // Add stats table (left half of top section)
     this.table = this.grid.set(0, 0, 6, 6, contrib.table, {
       keys: true,
       fg: "white",
@@ -246,22 +297,33 @@ class Pinger {
       selectedBg: "blue",
       interactive: false,
       label: "Statistics",
-      width: "50%",
-      height: "50%",
       border: { type: "line", fg: "cyan" },
       columnSpacing: 2,
       columnWidth: [15, 20],
     });
 
-    // Add latest logs box (top right)
+    // Configure log box with proper formatting
     this.logBox = this.grid.set(0, 6, 6, 6, contrib.log, {
       fg: "green",
       selectedFg: "green",
       label: "Latest Logs",
-      border: { type: "line", fg: "cyan" },
+      border: { type: "line", fg: "magenta" },
+      height: "50%",
+      tags: true,
+      style: {
+        fg: "green",
+        border: {
+          fg: "magenta",
+        },
+      },
+      screen: this.screen,
+      bufferLength: 6, // Match the logger's latest logs length
+      formatters: {
+        log: (args) => args.join(" "),
+      },
     });
 
-    // Add latency chart (bottom)
+    // Add latency chart (full width of bottom section)
     this.chart = this.grid.set(6, 0, 6, 12, contrib.line, {
       style: { line: "yellow", text: "green", baseline: "cyan" },
       xLabelPadding: 3,
@@ -271,8 +333,11 @@ class Pinger {
       label: "Latency History",
     });
 
-    // Set up log update callback
+    // Set up log update callback with proper screen rendering
     this.logger.setLogUpdateCallback((logs: string[]) => {
+      this.logBox.setItems(logs);
+      // Ensure content is cleared before updating
+      this.logBox.setContent("");
       this.logBox.setItems(logs);
       this.screen.render();
     });
@@ -378,17 +443,18 @@ class Pinger {
           this.stats.successful++;
           this.stats.latencies.push(latency);
           this.saveResult(latency, true);
+          this.logger.log(`Ping successful: ${latency}ms`, "INFO"); // Removed await
         } catch (err) {
           this.stats.failed++;
           this.saveResult(null, false);
-          await this.logger.log(`Ping failed: ${err}`, "WARN");
+          this.logger.log(`Ping failed: ${err}`, "WARN"); // Removed await
         }
         this.stats.totalPings++;
         this.updateDisplay();
         await new Promise((resolve) => setTimeout(resolve, 1000));
       }
     } catch (error) {
-      await this.logger.error(error as Error);
+      this.logger.error(error as Error);
       this.stop();
     }
   }
@@ -404,14 +470,14 @@ class Pinger {
   }
 
   private setupGlobalErrorHandling() {
-    process.on("uncaughtException", async (error) => {
-      await this.logger.error(`Uncaught Exception: ${error.message}`);
+    process.on("uncaughtException", (error) => {
+      this.logger.error(`Uncaught Exception: ${error.message}`);
       this.stop();
       process.exit(1);
     });
 
-    process.on("unhandledRejection", async (reason, promise) => {
-      await this.logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
+    process.on("unhandledRejection", (reason, promise) => {
+      this.logger.error(`Unhandled Rejection at: ${promise}, reason: ${reason}`);
       this.stop();
       process.exit(1);
     });
