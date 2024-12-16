@@ -2,6 +2,7 @@ import blessed from "blessed";
 import * as contrib from "blessed-contrib";
 import { Logger } from "../services/logger";
 import type { PingStats } from "../types/interfaces";
+import { MAX_GRAPH_SIZE } from "..";
 
 export class ScreenManager {
   private screen: blessed.Widgets.Screen;
@@ -16,6 +17,11 @@ export class ScreenManager {
     successful: 0,
     failed: 0,
     latencies: [],
+    stats: {
+      maxLatency: 0,
+      avgLatency: 0,
+      percentile99: 0,
+    },
   };
   private latencyHistory: number[] = [];
   private target: string;
@@ -24,6 +30,7 @@ export class ScreenManager {
     this.target = target;
     this.logger = logger;
     this.screen = this.initScreen();
+    Logger.setUIActive(true);
   }
 
   private initScreen(): blessed.Widgets.Screen {
@@ -114,8 +121,21 @@ export class ScreenManager {
       },
       screen: this.screen,
       bufferLength: 6,
+      // Add these options:
+      mouse: true,
+      scrollable: true,
+      alwaysScroll: true,
+      scrollbar: {
+        ch: "┃",
+        track: {
+          bg: "black",
+        },
+        style: {
+          fg: "black",
+        },
+      },
+      wrap: true, // Enable word wrapping
     });
-    this.currentLayout.push(this.logBox);
 
     // Add latency chart (full width of bottom section)
     this.chart = this.grid.set(6, 0, 6, 12, contrib.line, {
@@ -133,6 +153,7 @@ export class ScreenManager {
     this.logger.setLogUpdateCallback((logs: string[]) => {
       if (this.logBox) {
         this.logBox.setItems(logs);
+        this.logBox.setScrollPerc(100); // Force scroll to bottom
         this.screen.render();
       }
     });
@@ -165,7 +186,7 @@ export class ScreenManager {
       const failRate = (stats.failed / stats.totalPings) * 100;
 
       // Get only the last 50 latency results
-      const recentLatencies = stats.latencies.slice(-50);
+      const recentLatencies = stats.latencies.slice(-MAX_GRAPH_SIZE);
 
       // Update table data
       this.table.setData({
@@ -174,9 +195,9 @@ export class ScreenManager {
           ["Total Pings", stats.totalPings.toString()],
           ["Successful", `${stats.successful} (${successRate.toFixed(1)}%)`],
           ["Failed", `${stats.failed} (${failRate.toFixed(1)}%)`],
-          ["Max Latency", recentLatencies.length ? Math.max(...recentLatencies).toFixed(2) + " ms" : "N/A"],
-          ["Avg Latency", recentLatencies.length ? (recentLatencies.reduce((a, b) => a + b, 0) / recentLatencies.length).toFixed(2) + " ms" : "N/A"],
-          ["99th %ile", recentLatencies.length ? this.calculatePercentile(recentLatencies, 99).toFixed(2) + " ms" : "N/A"],
+          ["Max Latency", stats.stats.maxLatency.toFixed(2) + " ms"],
+          ["Avg Latency", stats.stats.avgLatency.toFixed(2) + " ms"],
+          ["99th %ile", stats.stats.percentile99.toFixed(2) + " ms"],
         ],
       });
 
@@ -197,6 +218,7 @@ export class ScreenManager {
 
   public destroy() {
     this.clearScreen();
+    Logger.setUIActive(false);
     if (this.screen) {
       this.screen.destroy();
     }
