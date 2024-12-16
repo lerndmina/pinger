@@ -1,11 +1,14 @@
-import { existsSync, mkdirSync } from "fs";
+import { existsSync, mkdirSync, readdirSync, statSync, unlinkSync } from "fs";
 import { join } from "path";
 import { appendFile, writeFile } from "fs/promises";
 import chalk from "chalk";
 import blessed from "blessed";
+import ms from "ms";
 import type { LoggerConfig } from "../types/interfaces";
+import { DEBUG, MAX_LOG_LINES_BUFFER } from "..";
 
 export class Logger {
+  private static isBlessed = false;
   private logDir: string;
   private logFilePath: string;
   private initialized: boolean = false;
@@ -23,17 +26,31 @@ export class Logger {
       mkdirSync(logsBaseDir, { recursive: true });
     }
 
-    const timestamp = new Date().toISOString().replace(/[:]/g, "-").split("T")[0] + "-" + new Date().toTimeString().split(" ")[0].replace(/:/g, "-");
+    const now = new Date();
+    const timestamp =
+      [now.getFullYear(), String(now.getMonth() + 1).padStart(2, "0"), String(now.getDate()).padStart(2, "0")].join("-") +
+      "_" +
+      [String(now.getHours()).padStart(2, "0"), String(now.getMinutes()).padStart(2, "0")].join(";");
     this.logDir = join(logsBaseDir, timestamp);
     this.logFilePath = join(this.logDir, "pinger.log");
     this.initPromise = this.ensureLogFile();
   }
 
+  public static setUIActive(active: boolean) {
+    Logger.isBlessed = active;
+  }
+
   private formatLogMessage(message: string): string {
-    if (message.length > this.maxLogLength) {
-      return message.substring(0, this.maxLogLength - 3) + "...";
-    }
-    return message;
+    // Handle multi-line messages
+    const lines = message.split("\n");
+    return lines
+      .map((line) => {
+        if (line.length > this.maxLogLength) {
+          return line.substring(0, this.maxLogLength - 3) + "...";
+        }
+        return line;
+      })
+      .join("\n");
   }
 
   public setLogUpdateCallback(callback: (logs: string[]) => void) {
@@ -61,9 +78,13 @@ export class Logger {
 
     // Strip timestamp for display using regex
     const displayEntry = logEntry.replace(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z\]\s/, "");
-    this.latestLogs.push(displayEntry);
-    if (this.latestLogs.length > 12) {
-      this.latestLogs.shift();
+
+    // Only show debug logs when DEBUG env variable is set
+    if (!(level === "DEBUG" && !DEBUG)) {
+      this.latestLogs.push(displayEntry);
+      if (this.latestLogs.length > MAX_LOG_LINES_BUFFER) {
+        this.latestLogs.shift();
+      }
     }
 
     // Update UI with proper blessed formatting
@@ -82,8 +103,8 @@ export class Logger {
       appendFile(this.logFilePath, logEntry + "\n").catch((err) => console.error("Failed to write to log file:", err));
     });
 
-    // Console output (only when blessed screen is not active)
-    if (!blessed.Screen.global) {
+    // Console output (only when blessed UI is not active)
+    if (!Logger.isBlessed) {
       switch (level) {
         case "ERROR":
           console.error(chalk.red(logEntry));
@@ -107,5 +128,36 @@ export class Logger {
 
   public getLatestLogs(): string[] {
     return this.latestLogs;
+  }
+
+  public getFilesInDir(dir: string): string[] {
+    if (!existsSync(dir)) {
+      return [];
+    }
+
+    return readdirSync(dir);
+  }
+
+  public cleanup(age: string) {
+    const ageMs = ms(age);
+    if (!ageMs) {
+      this.log(`Invalid age format: ${age} unable to cleanup logs`, "WARN");
+      return;
+    }
+
+    const now = Date.now();
+    const files = this.getFilesInDir(this.logDir);
+    if (files.length === 0) {
+      this.log(`No log files found in ${this.logDir}`, "DEBUG");
+      return;
+    }
+    for (const file of files) {
+      const filePath = join(this.logDir, file);
+      const stats = statSync(filePath);
+      if (now - stats.mtimeMs > ageMs) {
+        unlinkSync(filePath);
+        this.log(`Deleted log file: ${file}`, "DEBUG");
+      }
+    }
   }
 }

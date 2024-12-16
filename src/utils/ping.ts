@@ -1,4 +1,9 @@
 export async function ping(target: string): Promise<number> {
+  // Check if target is not empty
+  if (!target) {
+    throw new Error("Target is required");
+  }
+
   const args = getPingArgs(target);
   const proc = Bun.spawn(args, { stdout: "pipe", stderr: "pipe" });
   const output = await new Response(proc.stdout).text();
