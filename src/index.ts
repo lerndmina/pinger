@@ -204,7 +204,7 @@ class Pinger {
           const maxLatency = Math.max(...recentLatencies);
           const percentile99 = this.calculatePercentile(recentLatencies, 99);
 
-          this.logger.log(`Last ${LOG_AFTER_PINGS} pings: Avg: ${avgLatency.toFixed(2)}ms, Min: ${minLatency}ms, Max: ${maxLatency}ms, 99th %ile: ${percentile99}ms`, "INFO");
+          this.logger.log(`Last ${LOG_AFTER_PINGS} pings:\nAvg: ${avgLatency.toFixed(2)}ms\nMin: ${minLatency}ms\nMax: ${maxLatency}ms\n99th %ile: ${percentile99}ms`, "INFO");
         }
 
         // Wait before next ping
