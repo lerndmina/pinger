@@ -37,6 +37,10 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Start pinger
+REM Start pinger with arguments or default
 echo Starting pinger...
-call bun run src/index.ts 1.1.1.1
+if "%~1"=="" (
+    call bun run src/index.ts 1.1.1.1
+) else (
+    call bun run src/index.ts %*
+)

@@ -1,14 +1,16 @@
 import type { PingStats, StopOptions } from "./types/interfaces";
+import { mkdirSync, copyFileSync, unlinkSync } from "fs";
 import { Logger } from "./services/logger";
 import { DatabaseService } from "./services/database";
 import { ScreenManager } from "./ui/screen";
 import { ping } from "./utils/ping";
 import { join } from "path";
 import { execSync } from "child_process";
+import { existsSync } from "fs";
 
 export const MAX_GRAPH_SIZE = 50;
 export const LOG_AFTER_PINGS = 10;
-export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG === "true" || process.argv.includes("--debug");
+export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG === "true" || process.argv.includes("--debug") || process.argv.includes("-d");
 export const MAX_LOG_LINES_BUFFER = 1000;
 export const GITHUB_URL = "https://github.com/lerndmina/pinger";
 
@@ -262,14 +264,22 @@ async function main() {
   if (flags.includes("--help") || flags.includes("-h")) printHelpAndExit();
   if (flags.includes("--version") || flags.includes("-v")) {
     const v = await getVersion();
-    console.log(`Local Version: ${v.localSha}`);
+    console.log(`Local Sha: ${v.localSha.slice(0, 7)}`);
     console.log(`Remote Version: ${v.upstreamVersion}`);
     if (!v.isUpToDate) {
-      console.log("Your version differs from the latest release, perhaps you are out of date.");
+      console.log("Your sha differs from the latest release, perhaps you are out of date.");
       console.log("Consider updating:");
       console.log(`  ${GITHUB_URL}/releases/latest`);
     }
 
+    process.exit(0);
+  }
+  if (flags.includes("--fresh") || flags.includes("-f")) {
+    cleanDatabase();
+    // We continue to run the app after cleaning the database
+  }
+  if (flags.includes("--exit") || flags.includes("-e")) {
+    // Used in combination with --fresh to exit after cleaning the database
     process.exit(0);
   }
 
@@ -285,11 +295,12 @@ async function main() {
     const selectedTarget = target || lastTarget;
 
     if (!selectedTarget) {
-      throw new Error("No target provided and no previous target found. Usage: bun run src/index.ts [--debug] <hostname>");
+      printHelpAndExit();
+      process.exit(1);
     }
 
     if (!selectedTarget.trim()) {
-      throw new Error("Invalid target. Usage: bun run src/index.ts [--debug] <hostname>");
+      printHelpAndExit();
     }
 
     const pinger = new Pinger(selectedTarget);
@@ -304,7 +315,7 @@ async function main() {
 }
 
 function printHelpAndExit() {
-  const possibleFlags = ["--debug", "--help", "--version", "--fresh"];
+  const possibleFlags = ["--debug (-d)", "--help (-h)", "--version (-f)", "--fresh (-f)", "--exit (-e) used with --fresh to exit after cleaning the database"];
   const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
   const description = [
     "Ping a target host and display latency statistics in a terminal UI",
@@ -341,6 +352,34 @@ async function getVersion() {
   const isUpToDate = localSha === upstreamSha;
 
   return { localSha, upstreamVersion, upstreamSha, isUpToDate };
+}
+
+async function cleanDatabase() {
+  const dbPath = join(process.cwd(), "ping_history.sqlite");
+  if (!existsSync(dbPath)) {
+    console.log("No database found, skipping cleanup");
+    return;
+  }
+
+  const oldDbPath = join(process.cwd(), "old_db");
+  if (!existsSync(oldDbPath)) {
+    console.log("Creating old_db folder...");
+    mkdirSync(oldDbPath, { recursive: true });
+  }
+
+  // Create timestamped backup filename
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = join(oldDbPath, `ping_history_${timestamp}.sqlite`);
+
+  // Copy current database to backup location
+  console.log("Backing up current database...");
+  copyFileSync(dbPath, backupPath);
+
+  // Remove original database
+  console.log("Removing current database...");
+  unlinkSync(dbPath);
+
+  console.log("Database cleanup complete");
 }
 
 await main();

@@ -34,6 +34,10 @@ if [ $? -ne 0 ]; then
   exit 1
 fi
 
-# Start pinger
+# Start pinger with arguments or default to 1.1.1.1
 echo "Starting pinger..."
-bun run src/index.ts 1.1.1.1
+if [ $# -eq 0 ]; then
+  bun run src/index.ts 1.1.1.1
+else
+  bun run src/index.ts "$@"
+fi
