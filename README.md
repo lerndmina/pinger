@@ -25,7 +25,7 @@ A real-time network latency monitoring tool with a terminal-based UI built with 
 - [Node.js](https://nodejs.org) installed
 - [Python](https://www.python.org) installed
 
-## Installation
+## Run it!
 
 ```bash
 # Clone the repository
@@ -34,5 +34,11 @@ git clone https://github.com/lerndmina/pinger
 # Navigate to project directory
 cd network-ping-monitor
 
-# Install dependencies
-bun install
+# Run the script for your OS
+./start.sh or .\start.bat
+```
+
+## Get help
+```
+./start.sh -h
+```
