@@ -41,14 +41,15 @@ export class Logger {
   }
 
   private formatLogMessage(message: string): string {
-    // Handle multi-line messages
     const lines = message.split("\n");
     return lines
-      .map((line) => {
-        if (line.length > this.maxLogLength) {
-          return line.substring(0, this.maxLogLength - 3) + "...";
+      .map((line, index) => {
+        // Add indentation for all lines except first
+        const indentedLine = index === 0 ? line : "    " + line;
+        if (indentedLine.length > this.maxLogLength) {
+          return indentedLine.substring(0, this.maxLogLength - 3) + "...";
         }
-        return line;
+        return indentedLine;
       })
       .join("\n");
   }
@@ -76,18 +77,17 @@ export class Logger {
     const formattedMessage = this.formatLogMessage(message);
     const logEntry = `[${timestamp}] [${level}] ${formattedMessage}`;
 
-    // Strip timestamp for display using regex
-    const displayEntry = logEntry.replace(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z\]\s/, "");
+    // Split multiline entry and strip timestamp from each line
+    const displayLines = logEntry.split("\n").map((line) => line.replace(/\[\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}.\d{3}Z\]\s/, ""));
 
-    // Only show debug logs when DEBUG env variable is set
     if (!(level === "DEBUG" && !DEBUG)) {
-      this.latestLogs.push(displayEntry);
-      if (this.latestLogs.length > MAX_LOG_LINES_BUFFER) {
+      this.latestLogs.push(...displayLines);
+      while (this.latestLogs.length > MAX_LOG_LINES_BUFFER) {
         this.latestLogs.shift();
       }
     }
 
-    // Update UI with proper blessed formatting
+    // Update UI with proper blessed formatting for each line
     if (this.logUpdateCallback) {
       const colorizedLogs = this.latestLogs.map((log) => {
         if (log.includes("[ERROR]")) return `{red-fg}${log}{/red-fg}`;
@@ -98,27 +98,10 @@ export class Logger {
       this.logUpdateCallback(colorizedLogs);
     }
 
-    // Handle file writing asynchronously
+    // File writing with preserved formatting
     this.initPromise.then(() => {
       appendFile(this.logFilePath, logEntry + "\n").catch((err) => console.error("Failed to write to log file:", err));
     });
-
-    // Console output (only when blessed UI is not active)
-    if (!Logger.isBlessed) {
-      switch (level) {
-        case "ERROR":
-          console.error(chalk.red(logEntry));
-          break;
-        case "WARN":
-          console.warn(chalk.yellow(logEntry));
-          break;
-        case "DEBUG":
-          console.debug(chalk.blue(logEntry));
-          break;
-        default:
-          console.log(logEntry);
-      }
-    }
   }
 
   public error(error: Error | string) {
