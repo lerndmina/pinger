@@ -314,7 +314,7 @@ async function main() {
   }
 }
 
-function printHelpAndExit() {
+function printHelpAndExit(extraMsg?: string) {
   const possibleFlags = ["--debug (-d)", "--help (-h)", "--version (-f)", "--fresh (-f)", "--exit (-e) used with --fresh to exit after cleaning the database"];
   const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
   const description = [
@@ -326,6 +326,7 @@ function printHelpAndExit() {
     ...possibleFlags.map((flag) => `  ${flag}`),
     `You can use both hostnames and IP addresses as targets`,
     ...hostnameExamples.map((host) => `  ${host}`),
+    extraMsg && `Error: ${extraMsg}`,
   ];
 
   console.log(description.join("\n"));
