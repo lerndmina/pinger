@@ -9,11 +9,19 @@ if ! command -v node &>/dev/null; then
   exit 1
 fi
 
-# Check for Python
-if ! command -v python &>/dev/null; then
+echo "Found Node.js: $(node --version)"
+
+# Check for Python (python3 or python)
+if command -v python3 &>/dev/null; then
+  PYTHON_CMD="python3"
+elif command -v python &>/dev/null; then
+  PYTHON_CMD="python"
+else
   echo "Python is not installed. Please install from https://python.org"
   exit 1
 fi
+
+echo "Found Python: $($PYTHON_CMD --version)"
 
 # Check for Bun
 if ! command -v bun &>/dev/null; then
@@ -26,6 +34,8 @@ if ! command -v bun &>/dev/null; then
   source ~/.bashrc
 fi
 
+echo "Found Bun: $(bun --version)"
+
 # Install dependencies
 echo "Installing dependencies..."
 bun install
@@ -33,6 +43,8 @@ if [ $? -ne 0 ]; then
   echo "Failed to install dependencies"
   exit 1
 fi
+
+echo "Dependencies installed successfully"
 
 # Start pinger with arguments or default to 1.1.1.1
 echo "Starting pinger..."
