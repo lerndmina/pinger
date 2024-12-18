@@ -34,9 +34,17 @@ jobs:
           # Update package.json version
           npm version $VERSION --no-git-tag-version
 
-          # Commit and push changes to main branch
+          # Create and switch to a new branch
+          git checkout -b version-bump-branch
+
+          # Commit and push changes to the new branch
           git add package.json
           git commit -m "chore: bump version to ${VERSION} [skip ci]"
+          git push origin version-bump-branch
+
+          # Merge the new branch to main
+          git checkout main
+          git merge version-bump-branch
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
