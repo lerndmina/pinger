@@ -130,32 +130,27 @@ class Pinger {
   }
 
   private updateStats(latency: number | null, isSuccessful: boolean) {
-    // Update basic counters
     this.stats.totalPings++;
-    if (isSuccessful) {
+    if (isSuccessful && latency !== null) {
       this.stats.successful++;
-      if (latency !== null) {
-        this.stats.latencies.push(latency);
-        this.latencyHistory.push(latency);
+      this.latencyHistory.push(latency);
 
-        // Keep history at a reasonable size
-        if (this.latencyHistory.length > 5000) {
-          this.latencyHistory.shift();
-        }
-
-        // Calculate real-time statistics from recent latencies
-        const recentLatencies = this.latencyHistory.slice(-50);
-        this.stats.stats = {
-          maxLatency: Math.max(...recentLatencies),
-          avgLatency: recentLatencies.reduce((a, b) => a + b, 0) / recentLatencies.length,
-          percentile99: this.calculatePercentile(recentLatencies, 99),
-        };
+      // Keep rolling window of latest pings for real-time display
+      if (this.latencyHistory.length > this.db.maxResults) {
+        this.latencyHistory.shift();
       }
+
+      // Calculate stats from full history for accuracy
+      const allLatencies = this.latencyHistory;
+      this.stats.stats = {
+        maxLatency: Math.max(...allLatencies),
+        avgLatency: allLatencies.reduce((a, b) => a + b, 0) / allLatencies.length,
+        percentile99: this.calculatePercentile(allLatencies, 99),
+      };
     } else {
       this.stats.failed++;
     }
 
-    // Save to database
     this.db.saveResult(latency, isSuccessful);
   }
 
