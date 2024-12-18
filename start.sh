@@ -23,6 +23,14 @@ fi
 
 echo "Found Python: $($PYTHON_CMD --version)"
 
+# Check for git
+if ! command -v git &>/dev/null; then
+  echo "git is not installed. Please install git"
+  exit 1
+fi
+
+echo "Found git: $(git --version)"
+
 # Check for Bun
 if ! command -v bun &>/dev/null; then
   echo "Bun is not installed. Installing..."

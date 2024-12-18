@@ -11,10 +11,26 @@ if %errorlevel% neq 0 (
     exit /b 1
 )
 
-REM Check for Python
-where python >nul 2>&1
+REM Check for Python (python3 or python)
+where python3 >nul 2>&1
+if %errorlevel% equ 0 (
+    echo Found Python: python3 && python3 --version
+    set PYTHON_CMD=python3
+) else (
+    where python >nul 2>&1
+    if %errorlevel% equ 0 (
+        echo Found Python: python && python --version
+        set PYTHON_CMD=python
+    ) else (
+        echo Python is not installed. Please install from https://python.org
+        exit /b 1
+    )
+)
+
+REM Check for git
+where git >nul 2>&1
 if %errorlevel% neq 0 (
-    echo Python is not installed. Please install from https://python.org
+    echo Git is not installed. Please install from https://git-scm.com/downloads/win
     exit /b 1
 )
 
