@@ -44,7 +44,8 @@ jobs:
 
           # Merge the new branch to main
           git checkout main
-          git merge version-bump-branch
+          git pull origin main
+          git merge --no-ff version-bump-branch
           git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
