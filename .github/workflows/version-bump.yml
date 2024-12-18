@@ -12,30 +12,31 @@ jobs:
         with:
           fetch-depth: 0
           token: ${{ secrets.GITHUB_TOKEN }}
-      
+          ref: main # Explicitly checkout main branch
+
       - name: Setup Node.js
         uses: actions/setup-node@v3
         with:
-          node-version: '18.x'
-          registry-url: 'https://registry.npmjs.org'
-      
+          node-version: "18.x"
+          registry-url: "https://registry.npmjs.org"
+
       - name: Configure Git
         run: |
           git config --local user.email "github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-      
+
       - name: Update Version
         run: |
-          # Extract version from release tag (assuming semantic versioning)
+          # Extract version from release tag
           VERSION=${GITHUB_REF#refs/tags/}
           VERSION=${VERSION#v}  # Remove 'v' prefix if present
-          
+
           # Update package.json version
           npm version $VERSION --no-git-tag-version
-          
-          # Commit and push changes
+
+          # Commit and push changes to main branch
           git add package.json
           git commit -m "chore: bump version to ${VERSION} [skip ci]"
-          git push
+          git push origin main
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
