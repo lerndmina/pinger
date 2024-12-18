@@ -9,6 +9,7 @@ import { execSync } from "child_process";
 import { existsSync } from "fs";
 import { Command } from "commander";
 import parseSize from "./utils/parseSize";
+import { update } from "./utils/update";
 
 export const MAX_GRAPH_SIZE = 50;
 export const LOG_AFTER_PINGS = 10;
@@ -278,11 +279,34 @@ async function main() {
   } else if (options.version) {
     const v = await getVersion();
     console.log(`Local Sha: ${v.localSha.slice(0, 7)}`);
+    console.log(`Remote Sha: ${v.upstreamSha.slice(0, 7)}`);
     console.log(`Remote Version: ${v.upstreamVersion}`);
     if (!v.isUpToDate) {
       console.log("Your sha differs from the latest release, perhaps you are out of date.");
       console.log("Consider updating:");
       console.log(`  ${GITHUB_URL}/releases/latest`);
+      console.log("");
+      console.log("Would you like to update automatically? (y/n)");
+
+      // Create readline interface
+      const readline = require("readline").createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      // Handle user input
+      readline.question("", async (answer: string) => {
+        if (answer.toLowerCase() === "y") {
+          console.log("Starting update...");
+          await update();
+        } else {
+          console.log("Update cancelled");
+        }
+        readline.close();
+        process.exit(0);
+      });
+
+      return; // Prevent immediate exit
     }
     process.exit(0);
   }
@@ -331,7 +355,7 @@ ${extraMsg ? `\nError: ${extraMsg}` : ""}`
   process.exit(0);
 }
 
-async function getVersion() {
+export async function getVersion() {
   // Get remote sha from github latest commit
   let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
   let data = await response.json();
