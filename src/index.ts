@@ -7,12 +7,27 @@ import { ping } from "./utils/ping";
 import { join } from "path";
 import { execSync } from "child_process";
 import { existsSync } from "fs";
+import { Command } from "commander";
+import parseSize from "./utils/parseSize";
+import { update } from "./utils/update";
 
 export const MAX_GRAPH_SIZE = 50;
 export const LOG_AFTER_PINGS = 10;
 export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG === "true" || process.argv.includes("--debug") || process.argv.includes("-d");
 export const MAX_LOG_LINES_BUFFER = 1000;
 export const GITHUB_URL = "https://github.com/lerndmina/pinger";
+
+// Initialise program
+export const program = new Command()
+  .name("pinger")
+  .description("Network latency monitoring tool")
+  .argument("[target]", "hostname or IP to ping")
+  .helpOption("-h, --help", "display help for command")
+  .option("-d, --debug", "enable debug logging")
+  .option("-f, --fresh", "reset database")
+  .option("-e, --exit", "exit after cleaning database (with --fresh)")
+  .option("-v, --version", "output the version number")
+  .option("-l, --load-count <size>", "number of results to load (max 99m, supports k/m suffix)", parseSize);
 
 class Pinger {
   private logger: Logger;
@@ -23,7 +38,7 @@ class Pinger {
   private target: string;
   private latencyHistory: number[] = [];
 
-  constructor(target?: string) {
+  constructor(target?: string, options?: Record<string, any>) {
     try {
       // Initialize core services
       this.logger = new Logger({
@@ -33,7 +48,7 @@ class Pinger {
 
       this.db = new DatabaseService({
         path: join(process.cwd(), "ping_history.sqlite"),
-        maxResults: 50000,
+        maxResults: options?.loadCount || 50000,
       });
 
       // Initialize target
@@ -116,32 +131,27 @@ class Pinger {
   }
 
   private updateStats(latency: number | null, isSuccessful: boolean) {
-    // Update basic counters
     this.stats.totalPings++;
-    if (isSuccessful) {
+    if (isSuccessful && latency !== null) {
       this.stats.successful++;
-      if (latency !== null) {
-        this.stats.latencies.push(latency);
-        this.latencyHistory.push(latency);
+      this.latencyHistory.push(latency);
 
-        // Keep history at a reasonable size
-        if (this.latencyHistory.length > 5000) {
-          this.latencyHistory.shift();
-        }
-
-        // Calculate real-time statistics from recent latencies
-        const recentLatencies = this.latencyHistory.slice(-50);
-        this.stats.stats = {
-          maxLatency: Math.max(...recentLatencies),
-          avgLatency: recentLatencies.reduce((a, b) => a + b, 0) / recentLatencies.length,
-          percentile99: this.calculatePercentile(recentLatencies, 99),
-        };
+      // Keep rolling window of latest pings for real-time display
+      if (this.latencyHistory.length > this.db.maxResults) {
+        this.latencyHistory.shift();
       }
+
+      // Calculate stats from full history for accuracy
+      const allLatencies = this.latencyHistory;
+      this.stats.stats = {
+        maxLatency: Math.max(...allLatencies),
+        avgLatency: allLatencies.reduce((a, b) => a + b, 0) / allLatencies.length,
+        percentile99: this.calculatePercentile(allLatencies, 99),
+      };
     } else {
       this.stats.failed++;
     }
 
-    // Save to database
     this.db.saveResult(latency, isSuccessful);
   }
 
@@ -257,57 +267,65 @@ export const flags = process.argv.slice(2).filter((arg) => arg.startsWith("-"));
 
 // Application entry point
 async function main() {
-  // Filter out node/bun path, script path, and anything starting with "-"
-  const cleanArgs = process.argv.slice(2).filter((arg) => !arg.startsWith("-"));
-  const target = cleanArgs[0]; // First non-flag argument is the target
+  program.parse();
+  const options = program.opts();
+  const target = program.args[0];
 
-  if (flags.includes("--help") || flags.includes("-h")) printHelpAndExit();
-  if (flags.includes("--version") || flags.includes("-v")) {
+  if (options.fresh) {
+    cleanDatabase();
+    if (options.exit) {
+      process.exit(0);
+    }
+  } else if (options.version) {
     const v = await getVersion();
     console.log(`Local Sha: ${v.localSha.slice(0, 7)}`);
+    console.log(`Remote Sha: ${v.upstreamSha.slice(0, 7)}`);
     console.log(`Remote Version: ${v.upstreamVersion}`);
     if (!v.isUpToDate) {
       console.log("Your sha differs from the latest release, perhaps you are out of date.");
       console.log("Consider updating:");
       console.log(`  ${GITHUB_URL}/releases/latest`);
-    }
+      console.log("");
+      console.log("Would you like to update automatically? (y/n)");
 
-    process.exit(0);
-  }
-  if (flags.includes("--fresh") || flags.includes("-f")) {
-    cleanDatabase();
-    // We continue to run the app after cleaning the database
-  }
-  if (flags.includes("--exit") || flags.includes("-e")) {
-    // Used in combination with --fresh to exit after cleaning the database
+      // Create readline interface
+      const readline = require("readline").createInterface({
+        input: process.stdin,
+        output: process.stdout,
+      });
+
+      // Handle user input
+      readline.question("", async (answer: string) => {
+        if (answer.toLowerCase() === "y") {
+          console.log("Starting update...");
+          await update();
+        } else {
+          console.log("Update cancelled");
+        }
+        readline.close();
+        process.exit(0);
+      });
+
+      return; // Prevent immediate exit
+    }
     process.exit(0);
   }
 
   try {
     const db = new DatabaseService({
       path: join(process.cwd(), "ping_history.sqlite"),
-      maxResults: 50000,
+      maxResults: options.loadCount || 50000,
     });
 
     const lastTarget = db.getLastTarget();
+    const selectedTarget = target || lastTarget || "";
 
-    // Use target from args or last used target
-    const selectedTarget = target || lastTarget;
-
-    if (!selectedTarget) {
-      printHelpAndExit();
-      process.exit(1);
+    if (!selectedTarget?.trim()) {
+      printHelpAndExit("No target provided and no previous target found");
     }
 
-    if (!selectedTarget.trim()) {
-      printHelpAndExit();
-    }
-
-    const pinger = new Pinger(selectedTarget);
-    pinger.start().catch((error) => {
-      console.error("Fatal error:", error);
-      process.exit(1);
-    });
+    const pinger = new Pinger(selectedTarget, options);
+    await pinger.start();
   } catch (error) {
     console.error("Failed to start Pinger:", error);
     process.exit(1);
@@ -315,25 +333,29 @@ async function main() {
 }
 
 function printHelpAndExit(extraMsg?: string) {
-  const possibleFlags = ["--debug (-d)", "--help (-h)", "--version (-f)", "--fresh (-f)", "--exit (-e) used with --fresh to exit after cleaning the database"];
   const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
-  const description = [
-    "Ping a target host and display latency statistics in a terminal UI",
-    " - Usage: bun run src/index.ts <hostname>",
-    ` - Example: bun run src/index.ts google.com`,
-    ` - With debugging: bun run src/index.ts --debug ${randomString(hostnameExamples)}`,
-    "Flags:",
-    ...possibleFlags.map((flag) => `  ${flag}`),
-    `You can use both hostnames and IP addresses as targets`,
-    ...hostnameExamples.map((host) => `  ${host}`),
-    extraMsg && `Error: ${extraMsg}`,
-  ];
 
-  console.log(description.join("\n"));
+  // Add examples section to help
+  program.addHelpText(
+    "after",
+    `
+Examples:
+  $ bun run src/index.ts google.com
+  $ bun run src/index.ts --debug ${randomString(hostnameExamples)}
+  $ bun run src/index.ts -f -e          # Clean database and exit
+  $ bun run src/index.ts -l 100 8.8.8.8 # Load 100 results
+
+Valid targets:
+  ${hostnameExamples.join(", ")}
+
+${extraMsg ? `\nError: ${extraMsg}` : ""}`
+  );
+
+  program.help();
   process.exit(0);
 }
 
-async function getVersion() {
+export async function getVersion() {
   // Get remote sha from github latest commit
   let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
   let data = await response.json();

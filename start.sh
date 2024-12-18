@@ -26,6 +26,11 @@ echo "Found Python: $($PYTHON_CMD --version)"
 # Check for Bun
 if ! command -v bun &>/dev/null; then
   echo "Bun is not installed. Installing..."
+  # Check for bun's dependencies
+  if ! command -v unzip &>/dev/null; then
+    echo "unzip is not installed. Please install unzip"
+    exit 1
+  fi
   curl -fsSL https://bun.sh/install | bash
   if [ $? -ne 0 ]; then
     echo "Failed to install Bun"
