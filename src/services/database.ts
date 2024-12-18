@@ -10,7 +10,7 @@ interface LatencyStats {
 
 export class DatabaseService {
   private db: Database;
-  private maxResults: number;
+  maxResults: number;
   private maxInitialGraphResults = 50;
 
   constructor(config: DatabaseConfig) {
@@ -80,34 +80,34 @@ export class DatabaseService {
   }
 
   public loadHistoricalStats(): PingStats {
-    // Calculate statistics directly in SQL
+    // Calculate statistics using all successful pings for accuracy
     const statsResult = this.db
       .query(
         `
-      WITH recent_pings AS (
-        SELECT latency
-        FROM ping_results
-        WHERE is_successful = 1
-        ORDER BY id DESC
-        LIMIT ${this.maxInitialGraphResults}
-      ),
-      sorted_latencies AS (
-        SELECT latency, 
-          ROW_NUMBER() OVER (ORDER BY latency) as row_num,
-          COUNT(*) OVER () as total_count
-        FROM recent_pings
-      ),
-      percentile_calc AS (
-        SELECT latency
-        FROM sorted_latencies
-        WHERE row_num = CEIL(0.99 * total_count)
-      )
-      SELECT 
-        MAX(rp.latency) as max_latency,
-        AVG(rp.latency) as avg_latency,
-        (SELECT latency FROM percentile_calc) as percentile_99
-      FROM recent_pings rp
-    `
+        WITH successful_pings AS (
+          SELECT latency
+          FROM ping_results
+          WHERE is_successful = 1
+          ORDER BY id DESC
+          LIMIT ${this.maxResults}
+        ),
+        sorted_latencies AS (
+          SELECT latency, 
+            ROW_NUMBER() OVER (ORDER BY latency) as row_num,
+            COUNT(*) OVER () as total_count
+          FROM successful_pings
+        ),
+        percentile_calc AS (
+          SELECT latency
+          FROM sorted_latencies
+          WHERE row_num = CEIL(0.99 * total_count)
+        )
+        SELECT 
+          MAX(latency) as max_latency,
+          AVG(latency) as avg_latency,
+          (SELECT latency FROM percentile_calc) as percentile_99
+        FROM successful_pings
+      `
       )
       .get() as LatencyStats;
 
@@ -115,25 +115,25 @@ export class DatabaseService {
     const countStats = this.db
       .query(
         `
-      SELECT 
-        COUNT(*) as total_pings,
-        SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_pings,
-        SUM(CASE WHEN is_successful = 0 THEN 1 ELSE 0 END) as failed_pings
-      FROM ping_results
-    `
+        SELECT 
+          COUNT(*) as total_pings,
+          SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_pings,
+          SUM(CASE WHEN is_successful = 0 THEN 1 ELSE 0 END) as failed_pings
+        FROM ping_results
+      `
       )
       .get() as { total_pings: number; successful_pings: number; failed_pings: number };
 
-    // Get only recent latencies for graph
+    // Get recent latencies for graph display
     const recentLatencies = this.db
       .query(
         `
-      SELECT latency 
-      FROM ping_results 
-      WHERE is_successful = 1 
-      ORDER BY id DESC 
-      LIMIT ${MAX_GRAPH_SIZE}
-    `
+        SELECT latency 
+        FROM ping_results 
+        WHERE is_successful = 1 
+        ORDER BY id DESC 
+        LIMIT ${MAX_GRAPH_SIZE}
+      `
       )
       .all() as { latency: number }[];
 
@@ -143,9 +143,9 @@ export class DatabaseService {
       failed: countStats.failed_pings,
       latencies: recentLatencies.map((r) => r.latency).reverse(),
       stats: {
-        maxLatency: statsResult.max_latency,
-        avgLatency: statsResult.avg_latency,
-        percentile99: statsResult.percentile_99,
+        maxLatency: statsResult.max_latency || 0,
+        avgLatency: statsResult.avg_latency || 0,
+        percentile99: statsResult.percentile_99 || 0,
       },
     };
   }
