@@ -2,7 +2,7 @@ name: Version Bump on Release
 
 on:
   release:
-    types: [created]
+    types: [created, edited]
 
 jobs:
   build:
