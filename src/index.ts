@@ -1,4 +1,4 @@
-import type { PingStats, StopOptions } from "./types/interfaces";
+import type { LogLevel, PingStats, StopOptions } from "./types/interfaces";
 import { mkdirSync, copyFileSync, unlinkSync } from "fs";
 import { Logger } from "./services/logger";
 import { DatabaseService } from "./services/database";
@@ -7,7 +7,7 @@ import { ping } from "./utils/ping";
 import { join } from "path";
 import { exec, execSync } from "child_process";
 import { existsSync } from "fs";
-import { Command } from "commander";
+import { Command, type AddHelpTextPosition } from "commander";
 import parseSize from "./utils/parseSize";
 import { update } from "./utils/update";
 import { sleep } from "bun";
