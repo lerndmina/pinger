@@ -15,7 +15,7 @@ import { sleep } from "bun";
 export const MAX_GRAPH_SIZE = 50;
 export const LOG_AFTER_PINGS = 10;
 export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG === "true" || process.argv.includes("--debug") || process.argv.includes("-d");
-export const MAX_LOG_LINES_BUFFER = 1000;
+export const MAX_LOG_LINES_BUFFER = 50;
 export const GITHUB_URL = "https://github.com/lerndmina/pinger";
 
 interface infoSegment {
