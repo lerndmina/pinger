@@ -195,9 +195,14 @@ class Pinger {
         if (!v.isUpToDate) {
           this.logger.log("You are out of date, consider updating", "WARN");
           this.logger.log(`To update, launch the program with the --version (-v) flag`, "INFO");
+          if (v.currentBranch !== "main") {
+            this.logger.log(`You are on branch: ${v.currentBranch}`, "WARN");
+            this.logger.log(`If you are a developer, you should probably update manually if needed.`, "WARN");
+          }
         } else {
           this.logger.log(`Pinger is up to date: ${v.upstreamVersion}`, "INFO");
         }
+        this.logger.log(`Update check took: ${v.executionTime.toFixed(2)}ms`, "DEBUG");
       });
 
       // Main ping loop
@@ -301,6 +306,7 @@ ${extraMsg ? `\nError: ${extraMsg}` : ""}`
 }
 
 export async function getVersion() {
+  const startTime = performance.now();
   // Get remote sha from github latest commit
   let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
   let data = await response.json();
@@ -321,7 +327,9 @@ export async function getVersion() {
   // Compare local and remote sha
   const isUpToDate = localSha === upstreamSha;
 
-  return { localSha, upstreamVersion, upstreamSha, isUpToDate, currentBranch };
+  const executionTime = performance.now() - startTime;
+
+  return { localSha, upstreamVersion, upstreamSha, isUpToDate, currentBranch, executionTime };
 }
 
 async function cleanDatabase() {
