@@ -15,12 +15,10 @@ export class Logger {
   private latestLogs: string[] = [];
   private logUpdateCallback?: (logs: string[]) => void;
   private initPromise: Promise<void>;
-  private maxLogLength: number;
 
   constructor(config?: LoggerConfig) {
     // Set defaults or use provided config
     const logsBaseDir = config?.baseDir || join(process.cwd(), "src", "logs");
-    this.maxLogLength = config?.maxLogLength || 80;
 
     if (!existsSync(logsBaseDir)) {
       mkdirSync(logsBaseDir, { recursive: true });
@@ -45,11 +43,7 @@ export class Logger {
     return lines
       .map((line, index) => {
         // Add indentation for all lines except first
-        const indentedLine = index === 0 ? line : "    " + line;
-        if (indentedLine.length > this.maxLogLength) {
-          return indentedLine.substring(0, this.maxLogLength - 3) + "...";
-        }
-        return indentedLine;
+        return index === 0 ? line : "    " + line;
       })
       .join("\n");
   }
