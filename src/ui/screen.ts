@@ -2,6 +2,7 @@ import blessed from "blessed";
 import * as contrib from "blessed-contrib";
 import type { PingStats } from "../types/interfaces";
 import { Logger } from "../services/logger";
+import { spawn } from "child_process";
 import { MAX_GRAPH_SIZE } from "..";
 
 export class ScreenManager {
@@ -54,10 +55,9 @@ export class ScreenManager {
     });
 
     screen.key(["r"], () => {
-      this.logger.log("Manual refresh triggered");
-      this.clearScreen();
-      this.createLayout();
-      this.updateDisplay(this.stats);
+      // This is an awful hack because fuck windows.
+      // Windows/Powershell doesn't send resize events
+      this.restartProgram();
     });
 
     screen.key(["escape", "q", "C-c"], () => {
@@ -237,6 +237,38 @@ export class ScreenManager {
       this.screen.render();
     } catch (error) {
       this.logger.error(`Display update error: ${error}`);
+    }
+  }
+
+  private restartProgram() {
+    this.logger.log("Restarting program...");
+
+    try {
+      // Spawn new instance first
+      const child = spawn(process.argv[0], process.argv.slice(1), {
+        detached: true,
+        stdio: "inherit",
+        shell: true, // Add shell option for Windows
+        windowsHide: false, // Show new window on Windows
+      });
+
+      // Handle potential spawn errors
+      child.on("error", (err) => {
+        this.logger.error(`Failed to start new instance: ${err}`);
+        // Don't exit if spawn failed
+      });
+
+      // Only cleanup and exit once child is ready
+      child.on("spawn", () => {
+        child.unref();
+        this.destroy();
+        // Small delay to ensure child is running
+        setTimeout(() => {
+          process.exit(0);
+        }, 1000);
+      });
+    } catch (error) {
+      this.logger.error(`Restart failed: ${error}`);
     }
   }
 
