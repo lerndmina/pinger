@@ -1,0 +1,39 @@
+Pinger Analytics API Documentation
+================================
+
+This API endpoint collects analytics data from Pinger sessions and forwards them to PostHog.
+
+Endpoint:
+---------
+POST /
+
+Headers:
+--------
+Content-Type: application/json
+
+Request Body:
+------------
+{
+    "sessionId": string,    // Unique identifier for the session
+    "timestamp": number,    // Unix timestamp of the session
+    "duration": number,     // Session duration in milliseconds
+    "totalPings": number,   // Total number of pings in the session
+    "successRate": number,  // Success rate as a decimal (0-1)
+    "avgLatency": number,   // Average latency in milliseconds
+    "platform": string      // Platform identifier
+}
+
+Response:
+---------
+200 OK: Successfully processed
+400 Bad Request: Invalid payload
+405 Method Not Allowed: Wrong HTTP method
+
+CORS:
+-----
+The API supports CORS with the following:
+- Allowed Origins: *
+- Allowed Methods: POST
+- Allowed Headers: Content-Type
+
+Note: Analytics collection may be disabled by the server configuration.
