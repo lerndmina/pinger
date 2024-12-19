@@ -18,6 +18,17 @@ export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG
 export const MAX_LOG_LINES_BUFFER = 1000;
 export const GITHUB_URL = "https://github.com/lerndmina/pinger";
 
+interface infoSegment {
+  text: string;
+  level: LogLevel;
+  position?: AddHelpTextPosition;
+}
+
+const helpfulInfo: infoSegment[] = [
+  { text: "You can quit the program at any time by pressing 'q' or 'Ctrl+C' or 'Esc'", level: "INFO" },
+  { text: "If the auto window resizing is not working, press 'r' to refresh the layout", level: "INFO" },
+];
+
 // Initialise program
 export const program = new Command()
   .name("pinger")
@@ -29,6 +40,11 @@ export const program = new Command()
   .option("-e, --exit", "exit after cleaning database (with --fresh)")
   .option("-v, --version", "output the version number")
   .option("-l, --load-count <size>", "number of results to load (max 99m, supports k/m suffix)", parseSize);
+
+program.addHelpText("after", "\n");
+for (const segment of helpfulInfo) {
+  program.addHelpText(segment.position || "after", segment.text);
+}
 
 class Pinger {
   private logger: Logger;
@@ -177,6 +193,11 @@ class Pinger {
 
       // Perform pre-boot chores
       this.logger.cleanup(`7d`);
+
+      // Provide pre-boot info
+      for (const segment of helpfulInfo) {
+        this.logger.log(segment.text, segment.level);
+      }
 
       // Validate target connectivity
       this.logger.log(`Validating connection to ${this.target}...`, "INFO");
