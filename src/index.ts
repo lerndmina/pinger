@@ -98,6 +98,7 @@ class Pinger {
         latencies: [],
         stats: {
           maxLatency: 0,
+          minLatency: 0,
           avgLatency: 0,
           percentile99: 0,
         },
@@ -145,6 +146,7 @@ class Pinger {
       const allLatencies = this.latencyHistory;
       this.stats.stats = {
         maxLatency: Math.max(...allLatencies),
+        minLatency: Math.min(...allLatencies),
         avgLatency: allLatencies.reduce((a, b) => a + b, 0) / allLatencies.length,
         percentile99: this.calculatePercentile(allLatencies, 99),
       };
@@ -187,6 +189,13 @@ class Pinger {
         this.stop({ msg: shutdownMsg, sendHelp: true });
         process.exit(1);
       }
+
+      // Check for an update asynchonously
+      getVersion().then((v) => {
+        if (!v.isUpToDate) {
+          this.logger.log("You are out of date, consider updating.", "WARN");
+        }
+      });
 
       // Main ping loop
       while (this.isRunning) {

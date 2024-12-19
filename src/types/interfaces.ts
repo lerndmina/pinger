@@ -6,6 +6,7 @@ export interface PingStats {
   latencies: number[]; // Only recent ones for graph
   stats: {
     maxLatency: number;
+    minLatency: number;
     avgLatency: number;
     percentile99: number;
   };

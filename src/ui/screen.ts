@@ -19,6 +19,7 @@ export class ScreenManager {
     latencies: [],
     stats: {
       maxLatency: 0,
+      minLatency: 0,
       avgLatency: 0,
       percentile99: 0,
     },
