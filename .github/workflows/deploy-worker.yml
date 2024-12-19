@@ -6,6 +6,7 @@ on:
       - "analytics-worker/**"
     branches:
       - main
+      - dev
   workflow_dispatch: {} # Remove from paths filter to allow manual triggers
 
 jobs:
