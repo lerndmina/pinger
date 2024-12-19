@@ -1,6 +1,9 @@
 #!/bin/bash
 # start.sh
 
+# cd to the directory of the script
+cd "$(dirname "$0")"
+
 echo "Checking prerequisites..."
 
 # Check for Node.js
