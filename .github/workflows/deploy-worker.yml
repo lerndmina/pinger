@@ -6,6 +6,8 @@ on:
       - "analytics-worker/**"
     branches:
       - main
+      - dev
+  workflow_dispatch:
 
 jobs:
   deploy:
