@@ -14,7 +14,6 @@ export interface PingStats {
 
 export interface LoggerConfig {
   baseDir?: string;
-  maxLogLength?: number;
 }
 
 export interface DatabaseConfig {

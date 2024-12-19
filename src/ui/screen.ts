@@ -10,6 +10,7 @@ export class ScreenManager {
   private table: any;
   private chart: any;
   private logBox: any;
+  private logBoxWidth: number = 0;
   private logger: Logger;
   private currentLayout: any[] = [];
   private stats: PingStats = {
@@ -85,6 +86,58 @@ export class ScreenManager {
     }
   }
 
+  private wrapText(text: string, width: number): string {
+    // Handle empty or undefined text
+    if (!text) return "";
+
+    // Pre-process the text to handle existing line breaks
+    const paragraphs = text.split("\n");
+    const wrappedParagraphs = paragraphs.map((paragraph) => {
+      // Initialize variables for current line tracking
+      let currentLine = "";
+      const lines: string[] = [];
+
+      // Split into words but preserve special characters and spacing
+      const tokens = paragraph.split(/(\s+)/).filter((token) => token.length > 0);
+
+      for (const token of tokens) {
+        // If adding this token would exceed width
+        if ((currentLine + token).length > width) {
+          // If the token itself is longer than width, split it
+          if (token.length > width) {
+            // Push current line if it exists
+            if (currentLine) {
+              lines.push(currentLine.trimEnd());
+              currentLine = "";
+            }
+            // Split long token into chunks
+            let remainingToken = token;
+            while (remainingToken.length > width) {
+              lines.push(remainingToken.slice(0, width));
+              remainingToken = remainingToken.slice(width);
+            }
+            currentLine = remainingToken;
+          } else {
+            // Push current line and start new one with token
+            if (currentLine) {
+              lines.push(currentLine.trimEnd());
+            }
+            currentLine = token;
+          }
+        } else {
+          // Add token to current line
+          currentLine += token;
+        }
+      }
+      // Push any remaining text
+      if (currentLine) {
+        lines.push(currentLine.trimEnd());
+      }
+      return lines.join("\n");
+    });
+
+    return wrappedParagraphs.join("\n");
+  }
   public createLayout() {
     // Create layout grid
     this.grid = new contrib.grid({
@@ -122,7 +175,7 @@ export class ScreenManager {
       },
       screen: this.screen,
       bufferLength: 6,
-      // Add these options:
+      wrap: true,
       mouse: true,
       scrollable: true,
       alwaysScroll: true,
@@ -135,7 +188,13 @@ export class ScreenManager {
           fg: "black",
         },
       },
-      wrap: true, // Enable word wrapping
+    });
+
+    this.logBoxWidth = this.logBox.width - 4; // Account for borders
+
+    // Update log width on resize
+    this.screen.on("resize", () => {
+      this.logBoxWidth = this.logBox.width - 2;
     });
 
     // Add latency chart (full width of bottom section)
@@ -153,7 +212,8 @@ export class ScreenManager {
     // Set up log update callback with proper screen rendering
     this.logger.setLogUpdateCallback((logs: string[]) => {
       if (this.logBox) {
-        this.logBox.setItems(logs);
+        const wrappedLogs = logs.map((log) => this.wrapText(log, this.logBoxWidth));
+        this.logBox.setItems(wrappedLogs);
         this.logBox.setScrollPerc(100); // Force scroll to bottom
         this.screen.render();
       }

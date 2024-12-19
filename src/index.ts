@@ -44,7 +44,6 @@ class Pinger {
       // Initialize core services
       this.logger = new Logger({
         baseDir: join(process.cwd(), "src", "logs"),
-        maxLogLength: 80,
       });
 
       this.db = new DatabaseService({
