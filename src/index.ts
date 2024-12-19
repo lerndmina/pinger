@@ -5,7 +5,7 @@ import { DatabaseService } from "./services/database";
 import { ScreenManager } from "./ui/screen";
 import { ping } from "./utils/ping";
 import { join } from "path";
-import { execSync } from "child_process";
+import { exec, execSync } from "child_process";
 import { existsSync } from "fs";
 import { Command } from "commander";
 import parseSize from "./utils/parseSize";
@@ -137,7 +137,7 @@ class Pinger {
       this.latencyHistory.push(latency);
 
       // Keep rolling window of latest pings for real-time display
-      if (this.latencyHistory.length > this.db.maxResults) {
+      if (this.latencyHistory.length > this.db.queryLimit) {
         this.latencyHistory.shift();
       }
 
@@ -300,7 +300,13 @@ async function main() {
           console.log("Starting update...");
           await update();
         } else {
-          console.log("Update cancelled");
+          console.log("Update cancelled, would you like to run the program?");
+          readline.question("", async (answer: string) => {
+            if (answer.toLowerCase() === "y") {
+              execSync("bun src/index.ts");
+            }
+            readline.close();
+          });
         }
         readline.close();
         process.exit(0);
