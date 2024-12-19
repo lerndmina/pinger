@@ -1,6 +1,7 @@
 name = "pinger-analytics"
 main = "src/index.ts"
 compatibility_date = "2024-01-01"
+account_id = "396c740c5669a95511ef46c213bb0466"
 
 [vars]
 ANALYTICS_ALLOWED = true
