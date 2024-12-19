@@ -4,7 +4,7 @@ import { appendFile, writeFile } from "fs/promises";
 import chalk from "chalk";
 import blessed from "blessed";
 import ms from "ms";
-import type { LoggerConfig } from "../types/interfaces";
+import type { LoggerConfig, LogLevel } from "../types/interfaces";
 import { DEBUG, MAX_LOG_LINES_BUFFER } from "..";
 
 export class Logger {
@@ -66,7 +66,7 @@ export class Logger {
     this.initialized = true;
   }
 
-  public log(message: string, level: "INFO" | "WARN" | "ERROR" | "DEBUG" = "INFO") {
+  public log(message: string, level: LogLevel = "INFO") {
     const timestamp = new Date().toISOString();
     const formattedMessage = this.formatLogMessage(message);
     const logEntry = `[${timestamp}] [${level}] ${formattedMessage}`;

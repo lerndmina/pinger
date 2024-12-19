@@ -16,6 +16,8 @@ export interface LoggerConfig {
   baseDir?: string;
 }
 
+export type LogLevel = "INFO" | "WARN" | "ERROR" | "DEBUG";
+
 export interface DatabaseConfig {
   path: string;
   maxResults?: number;

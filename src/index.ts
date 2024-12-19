@@ -1,4 +1,4 @@
-import type { PingStats, StopOptions } from "./types/interfaces";
+import type { LogLevel, PingStats, StopOptions } from "./types/interfaces";
 import { mkdirSync, copyFileSync, unlinkSync } from "fs";
 import { Logger } from "./services/logger";
 import { DatabaseService } from "./services/database";
@@ -7,7 +7,7 @@ import { ping } from "./utils/ping";
 import { join } from "path";
 import { exec, execSync } from "child_process";
 import { existsSync } from "fs";
-import { Command } from "commander";
+import { Command, type AddHelpTextPosition } from "commander";
 import parseSize from "./utils/parseSize";
 import { update } from "./utils/update";
 import { sleep } from "bun";
@@ -17,6 +17,17 @@ export const LOG_AFTER_PINGS = 10;
 export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG === "true" || process.argv.includes("--debug") || process.argv.includes("-d");
 export const MAX_LOG_LINES_BUFFER = 1000;
 export const GITHUB_URL = "https://github.com/lerndmina/pinger";
+
+interface infoSegment {
+  text: string;
+  level: LogLevel;
+  position?: AddHelpTextPosition;
+}
+
+const helpfulInfo: infoSegment[] = [
+  { text: "You can quit the program at any time by pressing 'q' or 'Ctrl+C' or 'Esc'", level: "INFO" },
+  { text: "If the auto window resizing is not working, press 'r' to refresh the layout", level: "INFO" },
+];
 
 // Initialise program
 export const program = new Command()
@@ -29,6 +40,11 @@ export const program = new Command()
   .option("-e, --exit", "exit after cleaning database (with --fresh)")
   .option("-v, --version", "output the version number")
   .option("-l, --load-count <size>", "number of results to load (max 99m, supports k/m suffix)", parseSize);
+
+program.addHelpText("after", "\n");
+for (const segment of helpfulInfo) {
+  program.addHelpText(segment.position || "after", segment.text);
+}
 
 class Pinger {
   private logger: Logger;
@@ -178,6 +194,11 @@ class Pinger {
       // Perform pre-boot chores
       this.logger.cleanup(`7d`);
 
+      // Provide pre-boot info
+      for (const segment of helpfulInfo) {
+        this.logger.log(segment.text, segment.level);
+      }
+
       // Validate target connectivity
       this.logger.log(`Validating connection to ${this.target}...`, "INFO");
       try {
@@ -193,10 +214,16 @@ class Pinger {
       // Check for an update asynchonously
       getVersion().then(async (v) => {
         if (!v.isUpToDate) {
-          await sleep(1000); // Wait for logger to initialize
           this.logger.log("You are out of date, consider updating", "WARN");
           this.logger.log(`To update, launch the program with the --version (-v) flag`, "INFO");
+          if (v.currentBranch !== "main") {
+            this.logger.log(`You are on branch: ${v.currentBranch}`, "WARN");
+            this.logger.log(`If you are a developer, you should probably update manually if needed.`, "WARN");
+          }
+        } else {
+          this.logger.log(`Pinger is up to date: ${v.upstreamVersion}`, "INFO");
         }
+        this.logger.log(`Update check took: ${v.executionTime.toFixed(2)}ms`, "DEBUG");
       });
 
       // Main ping loop
@@ -276,17 +303,97 @@ function randomString(arr: string[]): string {
 
 export const flags = process.argv.slice(2).filter((arg) => arg.startsWith("-"));
 
+function printHelpAndExit(extraMsg?: string) {
+  const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
+
+  // Add examples section to help
+  program.addHelpText(
+    "after",
+    `
+Examples:
+  $ bun run src/index.ts google.com
+  $ bun run src/index.ts --debug ${randomString(hostnameExamples)}
+  $ bun run src/index.ts -f -e          # Clean database and exit
+  $ bun run src/index.ts -l 100 8.8.8.8 # Load 100 results
+
+Valid targets:
+  ${hostnameExamples.join(", ")}
+
+${extraMsg ? `\nError: ${extraMsg}` : ""}`
+  );
+
+  program.help();
+  process.exit(0);
+}
+
+export async function getVersion() {
+  const startTime = performance.now();
+  // Get remote sha from github latest commit
+  let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
+  let data = await response.json();
+
+  const currentBranch = execSync("git branch --show-current").toString().trim();
+
+  const upstreamSha = data.sha;
+
+  // Get remote version from github latest release
+  response = await fetch("https://api.github.com/repos/lerndmina/pinger/releases/latest");
+  data = await response.json();
+
+  const upstreamVersion = data.tag_name || "1.0.0";
+
+  // Get local sha from git
+  const localSha = execSync("git rev-parse HEAD").toString().trim();
+
+  // Compare local and remote sha
+  const isUpToDate = localSha === upstreamSha;
+
+  const executionTime = performance.now() - startTime;
+
+  return { localSha, upstreamVersion, upstreamSha, isUpToDate, currentBranch, executionTime };
+}
+
+async function cleanDatabase() {
+  const dbPath = join(process.cwd(), "ping_history.sqlite");
+  if (!existsSync(dbPath)) {
+    console.log("No database found, skipping cleanup");
+    return;
+  }
+
+  const oldDbPath = join(process.cwd(), "old_db");
+  if (!existsSync(oldDbPath)) {
+    console.log("Creating old_db folder...");
+    mkdirSync(oldDbPath, { recursive: true });
+  }
+
+  // Create timestamped backup filename
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = join(oldDbPath, `ping_history_${timestamp}.sqlite`);
+
+  // Copy current database to backup location
+  console.log("Backing up current database...");
+  copyFileSync(dbPath, backupPath);
+
+  // Remove original database
+  console.log("Removing current database...");
+  unlinkSync(dbPath);
+
+  console.log("Database cleanup complete");
+}
+
 // Application entry point
 async function main() {
   program.parse();
   const options = program.opts();
   const target = program.args[0];
 
+  // Clean database command used
   if (options.fresh) {
     cleanDatabase();
     if (options.exit) {
       process.exit(0);
     }
+    // Version command used
   } else if (options.version) {
     const v = await getVersion();
     console.log(`Local Sha: ${v.localSha.slice(0, 7)}`);
@@ -347,79 +454,6 @@ async function main() {
     console.error("Failed to start Pinger:", error);
     process.exit(1);
   }
-}
-
-function printHelpAndExit(extraMsg?: string) {
-  const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
-
-  // Add examples section to help
-  program.addHelpText(
-    "after",
-    `
-Examples:
-  $ bun run src/index.ts google.com
-  $ bun run src/index.ts --debug ${randomString(hostnameExamples)}
-  $ bun run src/index.ts -f -e          # Clean database and exit
-  $ bun run src/index.ts -l 100 8.8.8.8 # Load 100 results
-
-Valid targets:
-  ${hostnameExamples.join(", ")}
-
-${extraMsg ? `\nError: ${extraMsg}` : ""}`
-  );
-
-  program.help();
-  process.exit(0);
-}
-
-export async function getVersion() {
-  // Get remote sha from github latest commit
-  let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
-  let data = await response.json();
-
-  const upstreamSha = data.sha;
-
-  // Get remote version from github latest release
-  response = await fetch("https://api.github.com/repos/lerndmina/pinger/releases/latest");
-  data = await response.json();
-
-  const upstreamVersion = data.tag_name || "1.0.0";
-
-  // Get local sha from git
-  const localSha = execSync("git rev-parse HEAD").toString().trim();
-
-  // Compare local and remote sha
-  const isUpToDate = localSha === upstreamSha;
-
-  return { localSha, upstreamVersion, upstreamSha, isUpToDate };
-}
-
-async function cleanDatabase() {
-  const dbPath = join(process.cwd(), "ping_history.sqlite");
-  if (!existsSync(dbPath)) {
-    console.log("No database found, skipping cleanup");
-    return;
-  }
-
-  const oldDbPath = join(process.cwd(), "old_db");
-  if (!existsSync(oldDbPath)) {
-    console.log("Creating old_db folder...");
-    mkdirSync(oldDbPath, { recursive: true });
-  }
-
-  // Create timestamped backup filename
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupPath = join(oldDbPath, `ping_history_${timestamp}.sqlite`);
-
-  // Copy current database to backup location
-  console.log("Backing up current database...");
-  copyFileSync(dbPath, backupPath);
-
-  // Remove original database
-  console.log("Removing current database...");
-  unlinkSync(dbPath);
-
-  console.log("Database cleanup complete");
 }
 
 await main();
