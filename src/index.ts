@@ -193,7 +193,7 @@ class Pinger {
       // Check for an update asynchonously
       getVersion().then((v) => {
         if (!v.isUpToDate) {
-          this.logger.log("You are out of date, consider updating.", "WARN");
+          this.logger.log("You are out of date, consider updating", "WARN");
         }
       });
 
