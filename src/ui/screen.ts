@@ -53,6 +53,13 @@ export class ScreenManager {
       }, 100) as unknown as number;
     });
 
+    screen.key(["r"], () => {
+      this.logger.log("Manual refresh triggered");
+      this.clearScreen();
+      this.createLayout();
+      this.updateDisplay(this.stats);
+    });
+
     screen.key(["escape", "q", "C-c"], () => {
       this.destroy();
       process.exit(0);
