@@ -332,7 +332,10 @@ export async function getVersion() {
   let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
   let data = await response.json();
 
-  const currentBranch = execSync("git branch --show-current").toString().trim();
+  let currentBranch: string = "unknown";
+  try {
+    currentBranch = execSync("git branch --show-current").toString().trim();
+  } catch (error) {}
 
   const upstreamSha = data.sha;
 
@@ -343,7 +346,10 @@ export async function getVersion() {
   const upstreamVersion = data.tag_name || "1.0.0";
 
   // Get local sha from git
-  const localSha = execSync("git rev-parse HEAD").toString().trim();
+  let localSha: string = "unknown";
+  try {
+    localSha = execSync("git rev-parse HEAD").toString().trim();
+  } catch (error) {}
 
   // Compare local and remote sha
   const isUpToDate = localSha === upstreamSha;
