@@ -137,7 +137,7 @@ class Pinger {
       this.latencyHistory.push(latency);
 
       // Keep rolling window of latest pings for real-time display
-      if (this.latencyHistory.length > this.db.maxResults) {
+      if (this.latencyHistory.length > this.db.queryLimit) {
         this.latencyHistory.shift();
       }
 

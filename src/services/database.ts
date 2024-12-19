@@ -10,12 +10,13 @@ interface LatencyStats {
 
 export class DatabaseService {
   private db: Database;
-  maxResults: number;
+  public queryLimit: number;
+  private maxStorageLimit: number = 10000000; // 10M records maximum storage
   private maxInitialGraphResults = 50;
 
   constructor(config: DatabaseConfig) {
     this.db = new Database(config.path);
-    this.maxResults = config.maxResults || 5000;
+    this.queryLimit = config.maxResults || 5000;
     this.maxInitialGraphResults = config.maxInitialGraphResults || 50;
     this.initDatabase();
   }
@@ -48,7 +49,7 @@ export class DatabaseService {
   public getLastTarget(): string | null {
     try {
       const result = this.db.query("SELECT value FROM settings WHERE key = 'last_target'").get() as { value: string } | null;
-      return result?.value || null; // This is correct, but let's add some logging
+      return result?.value || null;
     } catch (error) {
       console.error("Error getting last target:", error);
       return null;
@@ -63,24 +64,27 @@ export class DatabaseService {
     // Insert ping result
     this.db.run("INSERT INTO ping_results (latency, is_successful) VALUES (?, ?)", [latency, isSuccessful ? 1 : 0]);
 
-    // Maintain only the last maxResults results in the database
-    this.db.run(
-      `
-      DELETE FROM ping_results 
-      WHERE id NOT IN (
-        SELECT id FROM (
-          SELECT id 
-          FROM ping_results 
-          ORDER BY id DESC 
-          ${this.maxResults > 0 && this.maxResults < Infinity ? `LIMIT ${this.maxResults}` : ""}
-        )
-      )
-    `
-    );
+    // Only trim if we exceed the maximum storage limit
+    const count = this.db.query("SELECT COUNT(*) as count FROM ping_results").get() as { count: number };
+
+    if (count.count > this.maxStorageLimit) {
+      // Delete oldest records keeping maxStorageLimit newest ones
+      this.db.run(
+        `DELETE FROM ping_results 
+         WHERE id NOT IN (
+           SELECT id FROM (
+             SELECT id 
+             FROM ping_results 
+             ORDER BY id DESC 
+             LIMIT ${this.maxStorageLimit}
+           )
+         )`
+      );
+    }
   }
 
   public loadHistoricalStats(): PingStats {
-    // Calculate statistics using all successful pings for accuracy
+    // Calculate statistics using the number of results specified by queryLimit
     const statsResult = this.db
       .query(
         `
@@ -89,7 +93,7 @@ export class DatabaseService {
           FROM ping_results
           WHERE is_successful = 1
           ORDER BY id DESC
-          LIMIT ${this.maxResults}
+          LIMIT ${this.queryLimit}
         ),
         sorted_latencies AS (
           SELECT latency, 
@@ -111,15 +115,21 @@ export class DatabaseService {
       )
       .get() as LatencyStats;
 
-    // Get counts for basic stats
+    // Get counts for basic stats (limited to queryLimit)
     const countStats = this.db
       .query(
         `
+        WITH limited_results AS (
+          SELECT *
+          FROM ping_results
+          ORDER BY id DESC
+          LIMIT ${this.queryLimit}
+        )
         SELECT 
           COUNT(*) as total_pings,
           SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_pings,
           SUM(CASE WHEN is_successful = 0 THEN 1 ELSE 0 END) as failed_pings
-        FROM ping_results
+        FROM limited_results
       `
       )
       .get() as { total_pings: number; successful_pings: number; failed_pings: number };
