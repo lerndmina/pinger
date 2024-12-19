@@ -196,6 +196,7 @@ class Pinger {
         if (!v.isUpToDate) {
           await sleep(1000); // Wait for logger to initialize
           this.logger.log("You are out of date, consider updating", "WARN");
+          this.logger.log(`To update, launch the program with the --version (-v) flag`, "INFO");
         }
       });
 
