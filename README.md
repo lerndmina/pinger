@@ -21,7 +21,7 @@ A real-time network latency monitoring tool with a terminal-based UI built with 
 
 ## Prerequisites
 
-- [Bun](https://bun.sh) runtime installed
+- [Bun](https://bun.sh) runtime installed (should be installed automatically by the script)
 - [Node.js](https://nodejs.org) installed
 - [Python](https://www.python.org) installed
 - [Git](https://git-scm.com) installed
