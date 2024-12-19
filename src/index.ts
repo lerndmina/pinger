@@ -10,6 +10,7 @@ import { existsSync } from "fs";
 import { Command } from "commander";
 import parseSize from "./utils/parseSize";
 import { update } from "./utils/update";
+import { sleep } from "bun";
 
 export const MAX_GRAPH_SIZE = 50;
 export const LOG_AFTER_PINGS = 10;
@@ -191,8 +192,9 @@ class Pinger {
       }
 
       // Check for an update asynchonously
-      getVersion().then((v) => {
+      getVersion().then(async (v) => {
         if (!v.isUpToDate) {
+          await sleep(1000); // Wait for logger to initialize
           this.logger.log("You are out of date, consider updating", "WARN");
         }
       });
