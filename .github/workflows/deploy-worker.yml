@@ -7,7 +7,7 @@ on:
     branches:
       - main
       - dev
-  workflow_dispatch:
+  workflow_dispatch: {} # Remove from paths filter to allow manual triggers
 
 jobs:
   deploy:
