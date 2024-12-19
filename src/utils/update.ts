@@ -3,36 +3,25 @@ import { mkdirSync, existsSync } from "fs";
 import { getVersion } from "../index";
 import fs from "fs/promises";
 import AdmZip from "adm-zip";
+import { execSync } from "child_process";
 
-async function copyRecursive(src: string, dest: string) {
-  const entries = await fs.readdir(src, { withFileTypes: true });
-  await fs.mkdir(dest, { recursive: true });
+async function gitPull(): Promise<void> {
+  try {
+    execSync("git fetch origin");
+    execSync("git reset --hard origin/main");
+  } catch (error) {
+    // @ts-expect-error
+    if (error.message.includes("not a git repository")) {
+      console.log("Not a git repository, cloning fresh...");
+      execSync("git clone https://github.com/lerndmina/pinger.git temp");
 
-  for (const entry of entries) {
-    const srcPath = join(src, entry.name);
-    const destPath = join(dest, entry.name);
-
-    if (entry.isDirectory()) {
-      await copyRecursive(srcPath, destPath);
+      // Use cross-platform file operations
+      await copyRecursive(join(process.cwd(), "temp"), process.cwd());
+      await removeRecursive(join(process.cwd(), "temp"));
     } else {
-      await fs.copyFile(srcPath, destPath);
+      throw new Error(`Git operation failed: ${error}`);
     }
   }
-}
-
-async function removeRecursive(dir: string) {
-  const entries = await fs.readdir(dir, { withFileTypes: true });
-
-  for (const entry of entries) {
-    const path = join(dir, entry.name);
-    if (entry.isDirectory()) {
-      await removeRecursive(path);
-    } else {
-      await fs.unlink(path);
-    }
-  }
-
-  await fs.rmdir(dir);
 }
 
 export async function update(options?: Record<string, any>): Promise<void> {
@@ -45,6 +34,7 @@ export async function update(options?: Record<string, any>): Promise<void> {
       return;
     }
 
+    // Create backup
     const backupDir = join(process.cwd(), "backups");
     const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
     const backupPath = join(backupDir, `backup_${timestamp}`);
@@ -60,18 +50,8 @@ export async function update(options?: Record<string, any>): Promise<void> {
     });
     zip.writeZip(join(backupPath + ".zip"));
 
-    console.log("Downloading new version...");
-    const response = await fetch(`https://api.github.com/repos/lerndmina/pinger/zipball/${version.upstreamSha}`);
-    const buffer = await response.arrayBuffer();
-
-    console.log("Extracting files...");
-    const updateZip = new AdmZip(Buffer.from(buffer));
-    const tempDir = join(process.cwd(), "temp_update");
-    updateZip.extractAllTo(tempDir, true);
-
-    const [updateFolder] = await fs.readdir(tempDir);
-    await copyRecursive(join(tempDir, updateFolder), process.cwd());
-    await removeRecursive(tempDir);
+    console.log("Updating code...");
+    await gitPull();
 
     console.log(`
 Update complete!
@@ -83,4 +63,25 @@ New version: ${version.upstreamSha.slice(0, 7)}
     console.error("Update failed:", error);
     throw error;
   }
+}
+
+// Helper functions for recursive operations
+async function copyRecursive(src: string, dest: string) {
+  const entries = await fs.readdir(src, { withFileTypes: true });
+  await fs.mkdir(dest, { recursive: true });
+
+  for (const entry of entries) {
+    const srcPath = join(src, entry.name);
+    const destPath = join(dest, entry.name);
+    entry.isDirectory() ? await copyRecursive(srcPath, destPath) : await fs.copyFile(srcPath, destPath);
+  }
+}
+
+async function removeRecursive(dir: string) {
+  const entries = await fs.readdir(dir, { withFileTypes: true });
+  for (const entry of entries) {
+    const path = join(dir, entry.name);
+    entry.isDirectory() ? await removeRecursive(path) : await fs.unlink(path);
+  }
+  await fs.rmdir(dir);
 }

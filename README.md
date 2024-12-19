@@ -27,12 +27,38 @@ A real-time network latency monitoring tool with a terminal-based UI built with 
 
 ## Installation
 
+1. Clone the repository:
+    ```bash
+    git clone https://github.com/lerndmina/pinger
+    ```
+
+2. Navigate to the project directory:
+    ```bash
+    cd pinger
+    ```
+
+## Usage
+
+Run the script for your OS:
 ```bash
-# Clone the repository
-git clone https://github.com/lerndmina/pinger
+# For Unix-based systems
+./start.sh
 
-# Navigate to project directory
-cd network-ping-monitor
+# For Windows
+.\start.bat
+```
 
-# Install dependencies
-bun install
+## Help
+
+For help, run:
+```bash
+./start.sh -h
+```
+
+## Contributing
+
+Contributions are welcome! Please fork the repository and submit a pull request.
+
+## License
+
+This project is licensed under the WTFPL license.
