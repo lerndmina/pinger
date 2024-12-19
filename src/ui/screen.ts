@@ -1,7 +1,7 @@
 import blessed from "blessed";
 import * as contrib from "blessed-contrib";
-import { Logger } from "../services/logger";
 import type { PingStats } from "../types/interfaces";
+import { Logger } from "../services/logger";
 import { MAX_GRAPH_SIZE } from "..";
 
 export class ScreenManager {
@@ -19,11 +19,11 @@ export class ScreenManager {
     latencies: [],
     stats: {
       maxLatency: 0,
+      minLatency: 0,
       avgLatency: 0,
       percentile99: 0,
     },
   };
-  private latencyHistory: number[] = [];
   private target: string;
 
   constructor(target: string, logger: Logger) {
@@ -40,26 +40,19 @@ export class ScreenManager {
       fullUnicode: true,
       autoPadding: true,
       handleUncaughtExceptions: true,
-      terminal: "xterm-256color", // Force consistent terminal type
+      terminal: "xterm-256color",
     });
 
-    // Add robust resize handler
     let resizeTimeout: number;
     screen.on("resize", () => {
-      // Debounce resize events
-      if (resizeTimeout) {
-        clearTimeout(resizeTimeout);
-      }
-
+      if (resizeTimeout) clearTimeout(resizeTimeout);
       resizeTimeout = setTimeout(() => {
-        // Clear and recreate everything
         this.clearScreen();
         this.createLayout();
         this.screen.render();
-      }, 100) as unknown as number; // Cast the timeout ID to number
+      }, 100) as unknown as number;
     });
 
-    // Handle exit
     screen.key(["escape", "q", "C-c"], () => {
       this.destroy();
       process.exit(0);
@@ -68,24 +61,7 @@ export class ScreenManager {
     return screen;
   }
 
-  private clearScreen() {
-    // Properly destroy all existing components
-    this.currentLayout.forEach((component) => {
-      if (component && typeof component.destroy === "function") {
-        component.destroy();
-      }
-    });
-    this.currentLayout = [];
-
-    // Clear the screen's children
-    while (this.screen.children.length) {
-      const child = this.screen.children[0];
-      this.screen.remove(child);
-    }
-  }
-
   public createLayout() {
-    // Create layout grid
     this.grid = new contrib.grid({
       rows: 12,
       cols: 12,
@@ -106,40 +82,44 @@ export class ScreenManager {
     });
     this.currentLayout.push(this.table);
 
-    // Configure log box with proper formatting
-    this.logBox = this.grid.set(0, 6, 6, 6, contrib.log, {
-      fg: "green",
-      selectedFg: "green",
+    // Configure log box using the grid system
+    this.logBox = this.grid.set(0, 6, 6, 6, blessed.log, {
       label: "Latest Logs",
-      border: { type: "line", fg: "magenta" },
       tags: true,
+      keys: true,
+      vi: true,
+      mouse: true,
+      scrollable: true,
+      scrollback: 100,
+      border: {
+        type: "line",
+        fg: "magenta",
+      },
+      scrollbar: {
+        ch: "┃",
+        style: {
+          fg: "white",
+        },
+        track: {
+          bg: "black",
+        },
+      },
       style: {
         fg: "green",
         border: {
           fg: "magenta",
         },
       },
-      screen: this.screen,
-      bufferLength: 6,
-      // Add these options:
-      mouse: true,
-      scrollable: true,
-      alwaysScroll: true,
-      scrollbar: {
-        ch: "┃",
-        track: {
-          bg: "black",
-        },
-        style: {
-          fg: "black",
-        },
-      },
-      wrap: true, // Enable word wrapping
     });
+    this.currentLayout.push(this.logBox);
 
     // Add latency chart (full width of bottom section)
     this.chart = this.grid.set(6, 0, 6, 12, contrib.line, {
-      style: { line: "yellow", text: "green", baseline: "cyan" },
+      style: {
+        line: "yellow",
+        text: "green",
+        baseline: "cyan",
+      },
       xLabelPadding: 3,
       xPadding: 5,
       showLegend: true,
@@ -149,11 +129,26 @@ export class ScreenManager {
     });
     this.currentLayout.push(this.chart);
 
-    // Set up log update callback with proper screen rendering
+    // Set up log update callback
     this.logger.setLogUpdateCallback((logs: string[]) => {
       if (this.logBox) {
-        this.logBox.setItems(logs);
-        this.logBox.setScrollPerc(100); // Force scroll to bottom
+        // Clear the log box first
+        this.logBox.setContent("");
+
+        // Add each log line with proper formatting
+        logs.forEach((log) => {
+          if (log.includes("[ERROR]")) {
+            this.logBox.pushLine(`{red-fg}${log}{/red-fg}`);
+          } else if (log.includes("[WARN]")) {
+            this.logBox.pushLine(`{yellow-fg}${log}{/yellow-fg}`);
+          } else if (log.includes("[DEBUG]")) {
+            this.logBox.pushLine(`{blue-fg}${log}{/blue-fg}`);
+          } else {
+            this.logBox.pushLine(`{green-fg}${log}{/green-fg}`);
+          }
+        });
+
+        this.logBox.scrollTo(this.logBox.getLines().length);
         this.screen.render();
       }
     });
@@ -161,17 +156,42 @@ export class ScreenManager {
     // Initialize with existing logs
     const currentLogs = this.logger.getLatestLogs();
     if (currentLogs.length > 0) {
-      this.logBox.setItems(currentLogs);
+      // Call the callback function with the current logs
+      this.logger.setLogUpdateCallback((logs: string[]) => {
+        if (this.logBox) {
+          this.logBox.setContent("");
+          logs.forEach((log) => {
+            if (log.includes("[ERROR]")) {
+              this.logBox.pushLine(`{red-fg}${log}{/red-fg}`);
+            } else if (log.includes("[WARN]")) {
+              this.logBox.pushLine(`{yellow-fg}${log}{/yellow-fg}`);
+            } else if (log.includes("[DEBUG]")) {
+              this.logBox.pushLine(`{blue-fg}${log}{/blue-fg}`);
+            } else {
+              this.logBox.pushLine(`{green-fg}${log}{/green-fg}`);
+            }
+          });
+          this.logBox.scrollTo(this.logBox.getLines().length);
+          this.screen.render();
+        }
+      });
     }
 
-    // Force a clean render
     this.screen.render();
   }
 
-  private calculatePercentile(arr: number[], percentile: number): number {
-    const sorted = [...arr].sort((a, b) => a - b);
-    const index = Math.ceil((percentile / 100) * sorted.length) - 1;
-    return sorted[index];
+  private clearScreen() {
+    this.currentLayout.forEach((component) => {
+      if (component && typeof component.destroy === "function") {
+        component.destroy();
+      }
+    });
+    this.currentLayout = [];
+
+    while (this.screen.children.length) {
+      const child = this.screen.children[0];
+      this.screen.remove(child);
+    }
   }
 
   public updateDisplay(stats: PingStats) {
@@ -185,10 +205,8 @@ export class ScreenManager {
       const successRate = (stats.successful / stats.totalPings) * 100;
       const failRate = (stats.failed / stats.totalPings) * 100;
 
-      // Get only the last 50 latency results
       const recentLatencies = stats.latencies.slice(-MAX_GRAPH_SIZE);
 
-      // Update table data
       this.table.setData({
         headers: ["Metric", "Value"],
         data: [
@@ -201,7 +219,6 @@ export class ScreenManager {
         ],
       });
 
-      // Update chart with only the last 50 points
       this.chart.setData([
         {
           title: "Latency",

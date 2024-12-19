@@ -6,6 +6,7 @@ export interface PingStats {
   latencies: number[]; // Only recent ones for graph
   stats: {
     maxLatency: number;
+    minLatency: number;
     avgLatency: number;
     percentile99: number;
   };
@@ -13,7 +14,6 @@ export interface PingStats {
 
 export interface LoggerConfig {
   baseDir?: string;
-  maxLogLength?: number;
 }
 
 export interface DatabaseConfig {
