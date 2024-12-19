@@ -22,7 +22,6 @@ export class DatabaseService {
   }
 
   private initDatabase() {
-    // Create necessary tables if they don't exist
     this.db.run(`
       CREATE TABLE IF NOT EXISTS settings (
         key TEXT PRIMARY KEY,
@@ -30,6 +29,7 @@ export class DatabaseService {
       )
     `);
 
+    // Create ping_results table to store the raw ping results
     this.db.run(`
       CREATE TABLE IF NOT EXISTS ping_results (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -39,7 +39,21 @@ export class DatabaseService {
       )
     `);
 
-    // Create an index to improve query performance
+    // Create ping_stats table to store aggregated stats
+    this.db.run(`
+      CREATE TABLE IF NOT EXISTS ping_stats (
+        id INTEGER PRIMARY KEY,
+        total_count INTEGER DEFAULT 0,
+        total_sum REAL DEFAULT 0,
+        historical_max REAL DEFAULT 0,
+        historical_min REAL DEFAULT NULL,
+        last_updated DATETIME DEFAULT CURRENT_TIMESTAMP
+      )`);
+
+    this.db.run(`
+        INSERT OR IGNORE INTO ping_stats (id) VALUES (1)
+      `);
+
     this.db.run(`
       CREATE INDEX IF NOT EXISTS idx_ping_results_timestamp 
       ON ping_results (timestamp)
@@ -64,88 +78,89 @@ export class DatabaseService {
     // Insert ping result
     this.db.run("INSERT INTO ping_results (latency, is_successful) VALUES (?, ?)", [latency, isSuccessful ? 1 : 0]);
 
-    // Only trim if we exceed the maximum storage limit
-    const count = this.db.query("SELECT COUNT(*) as count FROM ping_results").get() as { count: number };
-
-    if (count.count > this.maxStorageLimit) {
-      // Delete oldest records keeping maxStorageLimit newest ones
+    // Update running statistics
+    if (isSuccessful && latency !== null) {
       this.db.run(
-        `DELETE FROM ping_results 
-         WHERE id NOT IN (
-           SELECT id FROM (
-             SELECT id 
-             FROM ping_results 
-             ORDER BY id DESC 
-             LIMIT ${this.maxStorageLimit}
-           )
-         )`
+        `
+      UPDATE ping_stats 
+      SET 
+        total_count = total_count + 1,
+        total_sum = total_sum + ?,
+        historical_max = MAX(historical_max, ?),
+        historical_min = CASE 
+          WHEN historical_min IS NULL THEN ? 
+          ELSE MIN(historical_min, ?)
+        END,
+        last_updated = CURRENT_TIMESTAMP
+      WHERE id = 1`,
+        [latency, latency, latency, latency]
       );
     }
   }
 
   public loadHistoricalStats(): PingStats {
-    // Calculate statistics using the number of results specified by queryLimit
-    const statsResult = this.db
+    // Get running statistics
+    const stats = this.db
       .query(
         `
-        WITH successful_pings AS (
-          SELECT latency
-          FROM ping_results
-          WHERE is_successful = 1
-          ORDER BY id DESC
-          LIMIT ${this.queryLimit}
-        ),
-        sorted_latencies AS (
-          SELECT latency, 
-            ROW_NUMBER() OVER (ORDER BY latency) as row_num,
-            COUNT(*) OVER () as total_count
-          FROM successful_pings
-        ),
-        percentile_calc AS (
-          SELECT latency
-          FROM sorted_latencies
-          WHERE row_num = CEIL(0.99 * total_count)
-        )
-        SELECT 
-          MAX(latency) as max_latency,
-          AVG(latency) as avg_latency,
-          (SELECT latency FROM percentile_calc) as percentile_99
-        FROM successful_pings
-      `
+      SELECT 
+        total_count,
+        total_sum,
+        historical_max,
+        historical_min,
+        (total_sum / NULLIF(total_count, 0)) as historical_avg
+      FROM ping_stats 
+      WHERE id = 1
+    `
       )
-      .get() as LatencyStats;
+      .get() as {
+      total_count: number;
+      total_sum: number;
+      historical_max: number;
+      historical_min: number;
+      historical_avg: number;
+    };
 
-    // Get counts for basic stats (limited to queryLimit)
+    // Get counts for recent window
     const countStats = this.db
       .query(
         `
-        WITH limited_results AS (
-          SELECT *
-          FROM ping_results
-          ORDER BY id DESC
-          LIMIT ${this.queryLimit}
-        )
-        SELECT 
-          COUNT(*) as total_pings,
-          SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_pings,
-          SUM(CASE WHEN is_successful = 0 THEN 1 ELSE 0 END) as failed_pings
-        FROM limited_results
-      `
+      WITH limited_results AS (
+        SELECT *
+        FROM ping_results
+        ORDER BY id DESC
+        LIMIT ${this.queryLimit}
       )
-      .get() as { total_pings: number; successful_pings: number; failed_pings: number };
+      SELECT 
+        COUNT(*) as total_pings,
+        SUM(CASE WHEN is_successful = 1 THEN 1 ELSE 0 END) as successful_pings,
+        SUM(CASE WHEN is_successful = 0 THEN 1 ELSE 0 END) as failed_pings
+      FROM limited_results
+    `
+      )
+      .get() as {
+      total_pings: number;
+      successful_pings: number;
+      failed_pings: number;
+    };
 
-    // Get recent latencies for graph display
+    // Get recent latencies for percentile calculation and graph
     const recentLatencies = this.db
       .query(
         `
-        SELECT latency 
-        FROM ping_results 
-        WHERE is_successful = 1 
-        ORDER BY id DESC 
-        LIMIT ${MAX_GRAPH_SIZE}
-      `
+      SELECT latency 
+      FROM ping_results 
+      WHERE is_successful = 1 AND latency IS NOT NULL
+      ORDER BY id DESC 
+      LIMIT ${MAX_GRAPH_SIZE}
+    `
       )
       .all() as { latency: number }[];
+
+    // Calculate 99th percentile from recent data
+    const sortedLatencies = recentLatencies.map((r) => r.latency).sort((a, b) => a - b);
+    const percentileIdx = Math.ceil(sortedLatencies.length * 0.99) - 1;
+    const percentile99 = sortedLatencies[percentileIdx] || 0;
 
     return {
       totalPings: countStats.total_pings,
@@ -153,9 +168,10 @@ export class DatabaseService {
       failed: countStats.failed_pings,
       latencies: recentLatencies.map((r) => r.latency).reverse(),
       stats: {
-        maxLatency: statsResult.max_latency || 0,
-        avgLatency: statsResult.avg_latency || 0,
-        percentile99: statsResult.percentile_99 || 0,
+        maxLatency: stats.historical_max || 0,
+        minLatency: stats.historical_min || 0,
+        avgLatency: stats.historical_avg || 0,
+        percentile99: percentile99,
       },
     };
   }
