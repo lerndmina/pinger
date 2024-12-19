@@ -192,8 +192,8 @@ class Pinger {
 
       // Check for an update asynchonously
       getVersion().then(async (v) => {
+        await sleep(1000); // Wait for logger to initialize
         if (!v.isUpToDate) {
-          await sleep(1000); // Wait for logger to initialize
           this.logger.log("You are out of date, consider updating", "WARN");
           this.logger.log(`To update, launch the program with the --version (-v) flag`, "INFO");
         } else {
@@ -359,11 +359,13 @@ async function main() {
   const options = program.opts();
   const target = program.args[0];
 
+  // Clean database command used
   if (options.fresh) {
     cleanDatabase();
     if (options.exit) {
       process.exit(0);
     }
+    // Version command used
   } else if (options.version) {
     const v = await getVersion();
     console.log(`Local Sha: ${v.localSha.slice(0, 7)}`);
