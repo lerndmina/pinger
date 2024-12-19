@@ -278,6 +278,81 @@ function randomString(arr: string[]): string {
 
 export const flags = process.argv.slice(2).filter((arg) => arg.startsWith("-"));
 
+function printHelpAndExit(extraMsg?: string) {
+  const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
+
+  // Add examples section to help
+  program.addHelpText(
+    "after",
+    `
+Examples:
+  $ bun run src/index.ts google.com
+  $ bun run src/index.ts --debug ${randomString(hostnameExamples)}
+  $ bun run src/index.ts -f -e          # Clean database and exit
+  $ bun run src/index.ts -l 100 8.8.8.8 # Load 100 results
+
+Valid targets:
+  ${hostnameExamples.join(", ")}
+
+${extraMsg ? `\nError: ${extraMsg}` : ""}`
+  );
+
+  program.help();
+  process.exit(0);
+}
+
+export async function getVersion() {
+  // Get remote sha from github latest commit
+  let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
+  let data = await response.json();
+
+  const currentBranch = execSync("git branch --show-current").toString().trim();
+
+  const upstreamSha = data.sha;
+
+  // Get remote version from github latest release
+  response = await fetch("https://api.github.com/repos/lerndmina/pinger/releases/latest");
+  data = await response.json();
+
+  const upstreamVersion = data.tag_name || "1.0.0";
+
+  // Get local sha from git
+  const localSha = execSync("git rev-parse HEAD").toString().trim();
+
+  // Compare local and remote sha
+  const isUpToDate = localSha === upstreamSha;
+
+  return { localSha, upstreamVersion, upstreamSha, isUpToDate, currentBranch };
+}
+
+async function cleanDatabase() {
+  const dbPath = join(process.cwd(), "ping_history.sqlite");
+  if (!existsSync(dbPath)) {
+    console.log("No database found, skipping cleanup");
+    return;
+  }
+
+  const oldDbPath = join(process.cwd(), "old_db");
+  if (!existsSync(oldDbPath)) {
+    console.log("Creating old_db folder...");
+    mkdirSync(oldDbPath, { recursive: true });
+  }
+
+  // Create timestamped backup filename
+  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
+  const backupPath = join(oldDbPath, `ping_history_${timestamp}.sqlite`);
+
+  // Copy current database to backup location
+  console.log("Backing up current database...");
+  copyFileSync(dbPath, backupPath);
+
+  // Remove original database
+  console.log("Removing current database...");
+  unlinkSync(dbPath);
+
+  console.log("Database cleanup complete");
+}
+
 // Application entry point
 async function main() {
   program.parse();
@@ -349,79 +424,6 @@ async function main() {
     console.error("Failed to start Pinger:", error);
     process.exit(1);
   }
-}
-
-function printHelpAndExit(extraMsg?: string) {
-  const hostnameExamples = ["google.com", "1.1.1.1", "localhost", "127.0.0.1"];
-
-  // Add examples section to help
-  program.addHelpText(
-    "after",
-    `
-Examples:
-  $ bun run src/index.ts google.com
-  $ bun run src/index.ts --debug ${randomString(hostnameExamples)}
-  $ bun run src/index.ts -f -e          # Clean database and exit
-  $ bun run src/index.ts -l 100 8.8.8.8 # Load 100 results
-
-Valid targets:
-  ${hostnameExamples.join(", ")}
-
-${extraMsg ? `\nError: ${extraMsg}` : ""}`
-  );
-
-  program.help();
-  process.exit(0);
-}
-
-export async function getVersion() {
-  // Get remote sha from github latest commit
-  let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
-  let data = await response.json();
-
-  const upstreamSha = data.sha;
-
-  // Get remote version from github latest release
-  response = await fetch("https://api.github.com/repos/lerndmina/pinger/releases/latest");
-  data = await response.json();
-
-  const upstreamVersion = data.tag_name || "1.0.0";
-
-  // Get local sha from git
-  const localSha = execSync("git rev-parse HEAD").toString().trim();
-
-  // Compare local and remote sha
-  const isUpToDate = localSha === upstreamSha;
-
-  return { localSha, upstreamVersion, upstreamSha, isUpToDate };
-}
-
-async function cleanDatabase() {
-  const dbPath = join(process.cwd(), "ping_history.sqlite");
-  if (!existsSync(dbPath)) {
-    console.log("No database found, skipping cleanup");
-    return;
-  }
-
-  const oldDbPath = join(process.cwd(), "old_db");
-  if (!existsSync(oldDbPath)) {
-    console.log("Creating old_db folder...");
-    mkdirSync(oldDbPath, { recursive: true });
-  }
-
-  // Create timestamped backup filename
-  const timestamp = new Date().toISOString().replace(/[:.]/g, "-");
-  const backupPath = join(oldDbPath, `ping_history_${timestamp}.sqlite`);
-
-  // Copy current database to backup location
-  console.log("Backing up current database...");
-  copyFileSync(dbPath, backupPath);
-
-  // Remove original database
-  console.log("Removing current database...");
-  unlinkSync(dbPath);
-
-  console.log("Database cleanup complete");
 }
 
 await main();
