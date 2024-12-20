@@ -22,3 +22,5 @@ jobs:
           workingDirectory: "analytics-worker"
           secrets: |
             POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
+        env:
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
