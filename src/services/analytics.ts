@@ -53,6 +53,7 @@ export function checkAnalyticsConsent(): AnalyticsConsent {
 
 interface OtherStatsData {
   platform: string;
+  countryCode?: string;
   exitData: ExitData | null;
 }
 
@@ -61,12 +62,19 @@ interface ExitData {
   message: string;
 }
 
-export async function sendAnalytics(stats: PingStats, otherData: OtherStatsData = { platform: process.platform, exitData: null }): Promise<void> {
+export async function sendAnalytics(stats: PingStats, otherData?: OtherStatsData): Promise<void> {
   if (checkAnalyticsConsent() !== AnalyticsConsent.CONSENT) return;
 
   const duration = Date.now() - PROGRAM_START_TIME;
 
-  otherData.platform = otherData.platform || process.platform;
+  // Merge otherData with default values
+  const defaultOtherData: OtherStatsData = {
+    platform: process.platform,
+    countryCode: undefined,
+    exitData: null,
+  };
+
+  otherData = { ...defaultOtherData, ...otherData };
 
   try {
     const res = await fetch(ANALYTICS_ENDPOINT, {
@@ -80,6 +88,7 @@ export async function sendAnalytics(stats: PingStats, otherData: OtherStatsData 
         successRate: stats.successful / stats.totalPings,
         avgLatency: stats.stats.avgLatency,
         platform: otherData.platform,
+        countryCode: otherData.countryCode,
         exitData: otherData.exitData,
       }),
     });
