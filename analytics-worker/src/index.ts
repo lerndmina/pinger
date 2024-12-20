@@ -95,7 +95,7 @@ Note: Analytics collection may be disabled by the server configuration.
         throw new Error("Invalid payload, missing required fields. Request GET / for documentation.");
       }
 
-      console.log("Received analytics data:", data);
+      console.log(data);
 
       // Send to PostHog
       const res = await fetch("https://eu.i.posthog.com/capture", {
@@ -120,7 +120,7 @@ Note: Analytics collection may be disabled by the server configuration.
       });
 
       if (!res.ok) {
-        console.log("Failed to send data to PostHog", res.status, await res.text());
+        console.log("error", "Failed to send data to PostHog", res.status, await res.text());
         throw new Error("Failed to send data to PostHog");
       }
 

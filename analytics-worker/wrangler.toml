@@ -8,3 +8,6 @@ account_id = "396c740c5669a95511ef46c213bb0466"
 
 [vars]
 ANALYTICS_ALLOWED = true
+
+[observability]
+enabled = true
