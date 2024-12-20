@@ -69,7 +69,7 @@ export async function sendAnalytics(stats: PingStats, otherData: OtherStatsData 
   otherData.platform = otherData.platform || process.platform;
 
   try {
-    await fetch(ANALYTICS_ENDPOINT, {
+    const res = await fetch(ANALYTICS_ENDPOINT, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({
@@ -83,6 +83,10 @@ export async function sendAnalytics(stats: PingStats, otherData: OtherStatsData 
         exitData: otherData.exitData,
       }),
     });
+
+    if (!res.ok) {
+      logger.log("Failed to send analytics data: " + res.statusText, "DEBUG");
+    }
   } catch (error) {
     // Silently fail analytics
     logger.error("Failed to send analytics data: " + error);

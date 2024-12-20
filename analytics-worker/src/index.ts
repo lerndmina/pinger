@@ -61,6 +61,10 @@ Request Body:
     "successRate": number,  // Success rate as a decimal (0-1)
     "avgLatency": number,   // Average latency in milliseconds
     "platform": string      // Platform identifier
+    "exitData": {           // Optional exit data
+        "exitCode": string, // Exit code
+        "message": string   // Exit message
+    }
 }
 
 Response:
