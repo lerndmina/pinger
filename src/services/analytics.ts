@@ -6,7 +6,7 @@ import { Logger } from "./logger";
 import { ANALYTICS_SESSION_ID, PROGRAM_START_TIME } from "..";
 
 const ANALYTICS_FILE = join(process.cwd(), "analytics-enabled.txt");
-const ANALYTICS_ENDPOINT = "http://127.0.0.1:8787";
+const ANALYTICS_ENDPOINT = "pinger-analytics.lerndmina.workers.dev";
 
 export enum AnalyticsConsent {
   CONSENT = "consent",
