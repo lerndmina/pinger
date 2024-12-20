@@ -128,6 +128,7 @@ Note: Analytics collection may be disabled by the server configuration.
         throw new Error("Failed to send data to PostHog");
       }
 
+      console.log("info", "Successfully sent data to PostHog");
       return new Response("OK", { status: 200 });
     } catch (error) {
       return new Response("Invalid request", { status: 400 });
