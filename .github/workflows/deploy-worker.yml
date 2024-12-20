@@ -20,7 +20,6 @@ jobs:
         with:
           apiToken: ${{ secrets.CF_API_TOKEN }}
           workingDirectory: "analytics-worker"
-          secrets: |
-            POSTHOG_API_KEY=${{ secrets.POSTHOG_API_KEY }}
+          secrets: POSTHOG_API_KEY
         env:
           POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}
