@@ -1,0 +1,25 @@
+name: Deploy Analytics Worker
+
+on:
+  push:
+    paths:
+      - "analytics-worker/**"
+    branches:
+      - main
+      - dev
+  workflow_dispatch: {} # Remove from paths filter to allow manual triggers
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Deploy Worker
+        uses: cloudflare/wrangler-action@v3
+        with:
+          apiToken: ${{ secrets.CF_API_TOKEN }}
+          workingDirectory: "analytics-worker"
+          secrets: POSTHOG_API_KEY
+        env:
+          POSTHOG_API_KEY: ${{ secrets.POSTHOG_API_KEY }}

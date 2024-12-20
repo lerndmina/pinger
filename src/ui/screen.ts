@@ -3,7 +3,7 @@ import * as contrib from "blessed-contrib";
 import type { PingStats } from "../types/interfaces";
 import { Logger } from "../services/logger";
 import { spawn } from "child_process";
-import { MAX_GRAPH_SIZE } from "..";
+import { MAX_GRAPH_SIZE, PingerInstance } from "..";
 
 export class ScreenManager {
   private screen: blessed.Widgets.Screen;
@@ -61,8 +61,7 @@ export class ScreenManager {
     });
 
     screen.key(["escape", "q", "C-c"], () => {
-      this.destroy();
-      process.exit(0);
+      PingerInstance.stop();
     });
 
     return screen;
