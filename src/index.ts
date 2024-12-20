@@ -11,12 +11,16 @@ import { Command, type AddHelpTextPosition } from "commander";
 import parseSize from "./utils/parseSize";
 import { update } from "./utils/update";
 import { sleep } from "bun";
+import { AnalyticsConsent, askAnalyticsConsent, checkAnalyticsConsent, sendAnalytics, writeAnalyticsConsent } from "./services/analytics";
 
 export const MAX_GRAPH_SIZE = 50;
 export const LOG_AFTER_PINGS = 10;
 export const DEBUG = process.env.NODE_ENV === "development" || process.env.DEBUG === "true" || process.argv.includes("--debug") || process.argv.includes("-d");
 export const MAX_LOG_LINES_BUFFER = 50;
 export const GITHUB_URL = "https://github.com/lerndmina/pinger";
+export const ANALYTICS_SESSION_ID = Math.random().toString(36).substring(2, 15) + Math.random().toString(36).substring(2, 15);
+export const PROGRAM_START_TIME = Date.now();
+export let PingerInstance: Pinger;
 
 interface infoSegment {
   text: string;
@@ -39,7 +43,8 @@ export const program = new Command()
   .option("-f, --fresh", "reset database")
   .option("-e, --exit", "exit after cleaning database (with --fresh)")
   .option("-v, --version", "output the version number")
-  .option("-l, --load-count <size>", "number of results to load (max 99m, supports k/m suffix)", parseSize);
+  .option("-l, --load-count <size>", "number of results to load (max 99m, supports k/m suffix)", parseSize)
+  .option("-a, --analytics <true/false>", "enable or disable analytics", (val) => val === "true", await writeAnalyticsConsent(true));
 
 program.addHelpText("after", "\n");
 for (const segment of helpfulInfo) {
@@ -211,6 +216,12 @@ class Pinger {
         process.exit(1);
       }
 
+      // Check for analytics consent and inform user
+      this.logger.log(`Launching with analytics ${checkAnalyticsConsent() !== AnalyticsConsent.CONSENT ? "disabled" : `enabled with session ID ${ANALYTICS_SESSION_ID}`}`, "INFO");
+
+      // Send initial analytics if loaded from database
+      await sendAnalytics(this.stats);
+
       // Check for an update asynchonously
       getVersion().then(async (v) => {
         if (!v.isUpToDate) {
@@ -245,7 +256,7 @@ class Pinger {
         });
 
         // Log every LOG_AFTER_PINGS pings average, min, max, 99th percentile for the last 10 pings
-        if (this.stats.totalPings % 10 === 0) {
+        if (this.stats.totalPings % LOG_AFTER_PINGS === 0) {
           const recentLatencies = this.latencyHistory.slice(-LOG_AFTER_PINGS);
           const avgLatency = recentLatencies.reduce((a, b) => a + b, 0) / recentLatencies.length;
           const minLatency = Math.min(...recentLatencies);
@@ -253,6 +264,11 @@ class Pinger {
           const percentile99 = this.calculatePercentile(recentLatencies, 99);
 
           this.logger.log(`Last ${LOG_AFTER_PINGS} pings:\nAvg: ${avgLatency.toFixed(2)}ms\nMin: ${minLatency}ms\nMax: ${maxLatency}ms\n99th %ile: ${percentile99}ms`, "INFO");
+        }
+
+        // Every 1k pings, send analytics
+        if (this.stats.totalPings % 1_000 === 0) {
+          await sendAnalytics(this.stats);
         }
 
         // Wait before next ping
@@ -270,7 +286,7 @@ class Pinger {
    * @param msg Optional shutdown message
    * @param options Optional configuration for shutdown behavior
    */
-  public stop(options: Partial<StopOptions> = {}) {
+  public async stop(options: Partial<StopOptions> = {}) {
     const defaultOptions: StopOptions = {
       sendHelp: false,
       force: false,
@@ -288,10 +304,12 @@ class Pinger {
       if (finalOptions.msg) {
         this.logger.log(finalOptions.msg, "ERROR");
       }
+      await sendAnalytics(this.stats, { platform: process.platform, exitData: { exitCode: "normal", message: finalOptions.msg ? finalOptions.msg : "" } });
       if (finalOptions.force) process.exit(0);
       if (finalOptions.sendHelp) printHelpAndExit();
-    } catch (error) {
+    } catch (error: any) {
       console.error("Error during shutdown:", error);
+      await sendAnalytics(this.stats, { platform: process.platform, exitData: { exitCode: "error", message: error.message } });
       process.exit(1);
     }
   }
@@ -330,7 +348,7 @@ export async function getVersion() {
   const startTime = performance.now();
   // Get remote sha from github latest commit
   let response = await fetch("https://api.github.com/repos/lerndmina/pinger/commits/main");
-  let data = await response.json();
+  let data = (await response.json()) as any;
 
   let currentBranch: string = "unknown";
   try {
@@ -441,6 +459,16 @@ async function main() {
     process.exit(0);
   }
 
+  // Before bootup check for analyitcs consent
+  if (checkAnalyticsConsent() === "not-set") {
+    const consent = await askAnalyticsConsent();
+    if (consent) {
+      console.log("Thank you for enabling analytics!");
+    } else {
+      console.log("Analytics disabled");
+    }
+  }
+
   try {
     const db = new DatabaseService({
       path: join(process.cwd(), "ping_history.sqlite"),
@@ -455,6 +483,7 @@ async function main() {
     }
 
     const pinger = new Pinger(selectedTarget, options);
+    PingerInstance = pinger;
     await pinger.start();
   } catch (error) {
     console.error("Failed to start Pinger:", error);
