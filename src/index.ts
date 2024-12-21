@@ -463,6 +463,8 @@ async function main() {
   if (checkAnalyticsConsent() === AnalyticsConsent.NOT_SET) {
     if (options.analytics === true) {
       await writeAnalyticsConsent(true);
+    } else if (options.analytics === false) {
+      await writeAnalyticsConsent(false);
     } else {
       const consent = await askAnalyticsConsent();
       if (consent) {
