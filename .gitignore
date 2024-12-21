@@ -13,6 +13,7 @@ lerna-debug.log*
 # Application config & data
 *.json
 *.sqlite
+analytics-enabled.txt
 
 # Backups created when updating
 backups
