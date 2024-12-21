@@ -44,7 +44,7 @@ export const program = new Command()
   .option("-e, --exit", "exit after cleaning database (with --fresh)")
   .option("-v, --version", "output the version number")
   .option("-l, --load-count <size>", "number of results to load (max 99m, supports k/m suffix)", parseSize)
-  .option("-a, --analytics <true/false>", "enable or disable analytics", (val) => val === "true", await writeAnalyticsConsent(true));
+  .option("-a, --analytics <true/false>", "enable or disable analytics", (val) => val.toLowerCase() === "true", false);
 
 program.addHelpText("after", "\n");
 for (const segment of helpfulInfo) {
@@ -461,11 +461,15 @@ async function main() {
 
   // Before bootup check for analyitcs consent
   if (checkAnalyticsConsent() === "not-set") {
-    const consent = await askAnalyticsConsent();
-    if (consent) {
-      console.log("Thank you for enabling analytics!");
+    if (options.analytics) {
+      await writeAnalyticsConsent(true);
     } else {
-      console.log("Analytics disabled");
+      const consent = await askAnalyticsConsent();
+      if (consent) {
+        console.log("Thank you for enabling analytics!");
+      } else {
+        console.log("Analytics disabled");
+      }
     }
   }
 
