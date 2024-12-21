@@ -460,8 +460,8 @@ async function main() {
   }
 
   // Before bootup check for analyitcs consent
-  if (checkAnalyticsConsent() === "not-set") {
-    if (options.analytics) {
+  if (checkAnalyticsConsent() === AnalyticsConsent.NOT_SET) {
+    if (options.analytics === true) {
       await writeAnalyticsConsent(true);
     } else {
       const consent = await askAnalyticsConsent();
